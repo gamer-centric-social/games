@@ -57,6 +57,9 @@ export function useUnoAiGame({
   const botTimeoutRef = useRef(null)
   const botUnoCallTimersRef = useRef({})
   const botCatchHumanTimerRef = useRef(null)
+  // Solo's counterpart to hostEngine's game.pendingCatchPenalty: one catch resolves
+  // at a time, so a second one cannot overwrite the first one's modal.
+  const pendingCatchPenaltyRef = useRef(false)
   const aiPlayersRef = useRef(aiPlayers)
   useEffect(() => {
     aiPlayersRef.current = aiPlayers
@@ -119,6 +122,7 @@ export function useUnoAiGame({
     setAiPendingStackType(null)
     setFinishedCelebration({ isOpen: false, rank: 1, playerName: 'You', activeRemaining: 2 })
     hasShownMyCelebrationRef.current = false
+    pendingCatchPenaltyRef.current = false
     setPenaltyGiveCardModal({
       isOpen: false,
       mode: 'ai',
@@ -133,6 +137,7 @@ export function useUnoAiGame({
 
   const handlePlayAgainAi = () => {
     clearAllAiUnoTimers()
+    pendingCatchPenaltyRef.current = false
     setPenaltyGiveCardModal({
       isOpen: false,
       mode: 'ai',
@@ -149,6 +154,11 @@ export function useUnoAiGame({
   // When human player confirms giving a selected card in AI mode
   const handleConfirmGiveCardAi = useCallback(
     (selectedCard) => {
+      // Closing the penalty here also makes this idempotent: a second press of the
+      // confirm button finds it already closed and does nothing.
+      if (!pendingCatchPenaltyRef.current) return
+      pendingCatchPenaltyRef.current = false
+
       const { targetPlayerId, targetPlayerName, challengerId, botGifts = [] } =
         penaltyGiveCardModal
 
@@ -328,7 +338,15 @@ export function useUnoAiGame({
 
   const executeAiCatchUno = useCallback(
     (challengerId, targetPlayerId) => {
-      const target = aiPlayers.find((p) => p.id === targetPlayerId)
+      // The engine opens catchUno with exactly this guard; solo never had one, so a
+      // bot catching you at the same moment you caught a bot overwrote the modal --
+      // with gifts computed from whichever hands the stale closure had.
+      if (pendingCatchPenaltyRef.current) return
+
+      // Live players, not the closure's copy. The bot-catch timer below already
+      // reads the ref, and the two disagreeing is how cards went to the wrong hand.
+      const players = aiPlayersRef.current || aiPlayers
+      const target = players.find((p) => p.id === targetPlayerId)
       if (!target) return
 
       // Validate target: must have 1 card, not finished, not called UNO
@@ -363,12 +381,16 @@ export function useUnoAiGame({
         botCatchHumanTimerRef.current = null
       }
 
-      const otherActive = aiPlayers.filter(
+      const otherActive = players.filter(
         (p) => p.id !== targetPlayerId && p.hand.length > 0 && p.rank == null
       )
       if (otherActive.length === 0) return
 
       const isHumanActiveGiver = otherActive.some((p) => p.isHuman)
+
+      // From here the penalty is open, and no second catch may start until it is
+      // resolved -- the human branch below hands off to handleConfirmGiveCardAi.
+      pendingCatchPenaltyRef.current = true
 
       if (isHumanActiveGiver) {
         // Human is one of the active givers: prompt human with UnoGiveCardModal!
@@ -390,8 +412,10 @@ export function useUnoAiGame({
           botGifts,
         })
       } else {
-        // Human is NOT an active giver (human is the caught target or already finished)
-        // All givers are bots: auto-transfer cards
+        // Human is NOT an active giver (human is the caught target or already
+        // finished). All givers are bots, so this resolves here and now -- nothing
+        // waits on a modal, so the penalty closes again in the same breath.
+        pendingCatchPenaltyRef.current = false
         const botGifts = otherActive.map((bot) => ({
           giverId: bot.id,
           giverName: bot.name,
@@ -402,7 +426,7 @@ export function useUnoAiGame({
         let updatedRankings = [...aiRankings]
         const finishedBots = []
 
-        let updatedPlayers = aiPlayers.map((p) => {
+        let updatedPlayers = players.map((p) => {
           const bg = botGifts.find((g) => g.giverId === p.id)
           if (bg && bg.card) {
             const nextHand = p.hand.filter((c) => c.id !== bg.card.id)

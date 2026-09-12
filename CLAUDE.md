@@ -148,7 +148,7 @@ closures inside network callbacks and timers. Keep it that way.
 
 ## Before claiming a change works
 
-Run `npm test` (307 tests) and `npm run lint`. The engine tests exist because the UNO
+Run `npm test` (314 tests) and `npm run lint`. The engine tests exist because the UNO
 rules and the Tank collision maths are easy to break silently.
 
 Where the coverage is:
@@ -156,11 +156,11 @@ Where the coverage is:
 | Module | Tests |
 |---|---|
 | `uno/utils/deck.js` | 43 |
-| `uno/engine/hostEngine.js` | 63 |
+| `uno/engine/hostEngine.js` | 67 |
 | `uno/services/unoHandshake.js` | 20 |
 | `uno/utils/unoAi.js` | 23 |
 | `uno/utils/turnOrder.js` | 16 |
-| `uno/utils/drawFlightGeometry.js` | 10 |
+| `uno/utils/drawFlightGeometry.js` | 13 |
 | `uno/utils/handLayout.js` | 17 |
 | `tank/engine/tankSimulation.js` | 53 |
 | `tank/utils/tankPhysics.js` | 33 |

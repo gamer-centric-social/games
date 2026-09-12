@@ -10,10 +10,22 @@ import { cx } from '../../../components/ui/tokens'
 export default function UnoGiveCardModal({
   isOpen,
   targetPlayerName = 'Player',
+  challengerName = '',
+  isMyCatch = false,
   hand = [],
   onGiveCard,
 }) {
   const [selectedCardId, setSelectedCardId] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // The modal outlives each penalty, so opening it again has to start clean --
+  // adjusted during render rather than in an effect, which would render twice.
+  const [wasOpen, setWasOpen] = useState(isOpen)
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen)
+    setIsSubmitting(false)
+    setSelectedCardId(null)
+  }
 
   if (!isOpen || hand.length === 0) return null
 
@@ -41,14 +53,25 @@ export default function UnoGiveCardModal({
       open
       dismissible={false}
       size="md"
-      title={`Give a card to ${targetPlayerName}`}
+      // Who caught whom, not just who is owed a card. Two people can tap Catch at
+      // once and only one of them starts the penalty -- the loser is a giver in the
+      // winner's, and used to be shown a bare "Give a card to X" for a catch that
+      // was not theirs and, when they had aimed at someone else, not even their X.
+      title={
+        isMyCatch
+          ? `You caught ${targetPlayerName}`
+          : challengerName
+          ? `${challengerName} caught ${targetPlayerName}`
+          : `Give a card to ${targetPlayerName}`
+      }
       footer={
         <Button
           tone="uno"
           fullWidth
-          disabled={!selectedCard}
+          disabled={!selectedCard || isSubmitting}
           onClick={() => {
-            if (!selectedCard) return
+            if (!selectedCard || isSubmitting) return
+            setIsSubmitting(true)
             playClickSound()
             onGiveCard(selectedCard)
           }}

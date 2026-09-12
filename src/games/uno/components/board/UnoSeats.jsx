@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ArrowRight, ArrowLeft, Hand } from 'lucide-react'
 import { getRankBadge } from '../../constants/unoConstants'
 import { isFinishedPlayer } from '../../utils/turnOrder'
@@ -25,6 +25,15 @@ import { FOCUS, cx } from '../../../../components/ui/tokens'
 function Seat({ player, isActive, isMine, count, finished, calledUno, skipped, onCatch }) {
   const rank = finished ? getRankBadge(player.rank) : null
   const catchable = Boolean(onCatch)
+  // One tap, one catch. A phone double-tap used to send the action twice, and the
+  // second one came back as "someone already caught them" -- about yourself. Rearmed
+  // during render when the seat stops being catchable, not in an effect.
+  const [caught, setCaught] = useState(false)
+  const [wasCatchable, setWasCatchable] = useState(catchable)
+  if (catchable !== wasCatchable) {
+    setWasCatchable(catchable)
+    if (!catchable) setCaught(false)
+  }
 
   const body = (
     <>
@@ -80,10 +89,23 @@ function Seat({ player, isActive, isMine, count, finished, calledUno, skipped, o
   // find it was to tap someone and read the rejection.
   if (catchable) {
     return (
-      <button type="button" onClick={onCatch} className={cx(shell, 'cursor-pointer', FOCUS)}>
+      <button
+        type="button"
+        disabled={caught}
+        onClick={() => {
+          setCaught(true)
+          onCatch()
+        }}
+        className={cx(shell, !caught && 'cursor-pointer', FOCUS)}
+      >
         {spot}
         {body}
-        <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-uno text-table text-nano font-bold uppercase">
+        <span
+          className={cx(
+            'flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-nano font-bold uppercase',
+            caught ? 'bg-uno/30 text-ink-faint' : 'bg-uno text-table'
+          )}
+        >
           <Hand className="w-2.5 h-2.5" />
           Catch
         </span>

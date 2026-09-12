@@ -80,15 +80,11 @@ function UnoStatusLine({
       aria-live="polite"
       className="relative z-10 h-9 flex items-center justify-center px-4"
     >
-      <span className="sr-only">
-        {isSpectating
-          ? `${them} is playing.`
-          : isCurrentTurnForMe
-          ? 'Your turn.'
-          : them
-          ? `${them}'s turn.`
-          : ''}
-      </span>
+      {/* Only your own turn, and only when the visible line is not already saying
+          something. Every other case is named in the line below, which a screen
+          reader reads from this same live region -- announcing it twice is worse
+          than not announcing it at all. */}
+      <span className="sr-only">{isCurrentTurnForMe && !text ? 'Your turn.' : ''}</span>
       {text && (
         <p
           className={cx(

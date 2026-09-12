@@ -624,6 +624,18 @@ describe('catchUno', () => {
     expect(catchUno(game, 2, 0).ok).toBe(false)
   })
 
+  it('names who won the race, so the loser can be told why nothing happened', () => {
+    // Two people tapping Catch at once is the reported case; a bare rejection left
+    // the second one staring at a button that did nothing.
+    const game = catchableGame()
+    catchUno(game, 1, 0)
+    const second = catchUno(game, 2, 0)
+
+    expect(second.ok).toBe(false)
+    expect(second.reason).toContain(game.players[1].name)
+    expect(second.reason).toContain(game.players[0].name)
+  })
+
   it('transfers one card from each giver once everyone has answered', () => {
     const game = catchableGame()
     const before = totalCards(game)
@@ -656,6 +668,26 @@ describe('catchUno', () => {
 
     submitPenaltyCard(game, 1, { id: 'ghost' }, game.pendingCatchPenalty.penaltyId)
     expect(game.pendingCatchPenalty.givenCards.get(1).id).toBe(expected.id)
+    expect(game.pendingCatchPenalty.substitutedGivers.has(1)).toBe(true)
+  })
+
+  it('says so when the card that left a hand is not the card that was picked', () => {
+    const game = catchableGame()
+    catchUno(game, 1, 0)
+    submitPenaltyCard(game, 1, { id: 'ghost' }, game.pendingCatchPenalty.penaltyId)
+    submitPenaltyCard(game, 2, handOf(game, 2)[0], game.pendingCatchPenalty.penaltyId)
+
+    expect(game.actionMessage).toContain(game.players[1].name)
+    expect(game.actionMessage).toMatch(/never reached the host/)
+  })
+
+  it('records a real pick as a real pick, with nothing to report', () => {
+    const game = catchableGame()
+    catchUno(game, 1, 0)
+    submitPenaltyCard(game, 1, handOf(game, 1)[1], game.pendingCatchPenalty.penaltyId)
+
+    expect(game.pendingCatchPenalty.substitutedGivers.size).toBe(0)
+    expect(game.pendingCatchPenalty.autoPickedGivers.size).toBe(0)
   })
 
   it('auto-picks for anyone still silent when the timeout fires', () => {
@@ -666,6 +698,18 @@ describe('catchUno', () => {
     expect(result.ok).toBe(true)
     expect(handOf(game, 0)).toHaveLength(3)
     expect(game.pendingCatchPenalty).toBeNull()
+  })
+
+  it('names whoever had a card taken for them when the timeout fires', () => {
+    const game = catchableGame()
+    catchUno(game, 1, 0)
+    // P1 answers in time; P2 does not.
+    submitPenaltyCard(game, 1, handOf(game, 1)[0], game.pendingCatchPenalty.penaltyId)
+    forceResolvePenalty(game)
+
+    expect(game.actionMessage).toMatch(/Time ran out/)
+    expect(game.actionMessage).toContain(game.players[2].name)
+    expect(game.actionMessage).not.toMatch(new RegExp(`Time ran out for [^—]*${game.players[1].name}`))
   })
 
   it('lets a giver go out by handing over their last card', () => {

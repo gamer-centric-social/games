@@ -53,6 +53,8 @@ export default function UnoBoard({
   connectionStatus = 'connected',
   onReconnect = null,
   rankings = [],
+  handSortMode = 'none',
+  onCycleSort,
 }) {
   const myPlayer = players.find((p) => p.id === myPlayerId) || players[0]
   const myPlayerRank =
@@ -108,21 +110,21 @@ export default function UnoBoard({
   const myCanPlayAnyCard = playableIds.size > 0
   const myCanStack = pendingDrawCount > 0 && myCanPlayAnyCard
 
-  const [handSortMode, setHandSortMode] = useState('none') // 'none' | 'color' | 'number'
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [flightSpacing, setFlightSpacing] = useState(null)
 
   const drawPileRef = useRef(null)
   const handTrayRef = useRef(null)
-
-  const resetHandSort = useCallback(() => setHandSortMode('none'), [])
+  // Filled by the tray each commit: where every card in the hand actually is, so a
+  // drawn card can fly to its own slot even when a sort has put it mid-row.
+  const handLayoutRef = useRef(null)
 
   const { flyingCards, newlyDrawnCardIds, clearNewBadges } = useDrawAnimation({
     handCards,
     drawPileRef,
     handTrayRef,
-    onCardsDrawn: resetHandSort,
+    handLayoutRef,
     spacing: flightSpacing,
   })
 
@@ -272,12 +274,13 @@ export default function UnoBoard({
               onCallUno={onCallUno}
               onPassTurn={onPassTurn}
               handSortMode={handSortMode}
-              onCycleSort={setHandSortMode}
+              onCycleSort={onCycleSort}
               isSpectating={isSpectating}
             />
 
             <UnoHandTray
               handTrayRef={handTrayRef}
+              handLayoutRef={handLayoutRef}
               displayedHandCards={displayedHandCards}
               isCurrentTurnForMe={isCurrentTurnForMe}
               playableIds={playableIds}

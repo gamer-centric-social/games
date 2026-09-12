@@ -46,6 +46,7 @@ const prefersReducedMotion = () =>
  */
 function UnoHandTray({
   handTrayRef,
+  handLayoutRef,
   displayedHandCards,
   isCurrentTurnForMe,
   playableIds,
@@ -87,6 +88,41 @@ function UnoHandTray({
       onStepChange(layout.flightSpacing)
     }
   }, [layout.flightSpacing, onStepChange])
+
+  // What the board's draw effect needs to fly a card to its own slot: where each
+  // card sits, and a way to bring one into view first.
+  //
+  // Written in a layout effect because that effect reads it in the same commit, and
+  // a child's layout effect runs before a parent's passive one. Positions are kept
+  // in content coordinates and converted on read, so `reveal` scrolling the rail
+  // cannot leave the answer stale by exactly the amount it just scrolled -- which
+  // is what happened when the flight aimed at one place and the tray then slid the
+  // card to another.
+  useLayoutEffect(() => {
+    if (!handLayoutRef) return
+    const xById = new Map()
+    for (const position of layout.positions) xById.set(position.id, position.x)
+
+    handLayoutRef.current = {
+      /** Bring a card fully into view. Instant: it settles before the card lands. */
+      reveal(id) {
+        const rail = handTrayRef.current
+        const x = xById.get(id)
+        if (!rail || x === undefined) return
+        const slot = layout.positions.find((p) => p.id === id)?.slot ?? 0
+        if (x < rail.scrollLeft) rail.scrollLeft = Math.max(x - EDGE_PADDING, 0)
+        else if (x + slot > rail.scrollLeft + rail.clientWidth) {
+          rail.scrollLeft = x + slot + EDGE_PADDING - rail.clientWidth
+        }
+      },
+      viewportX(id) {
+        const rail = handTrayRef.current
+        const x = xById.get(id)
+        if (!rail || x === undefined) return undefined
+        return rail.getBoundingClientRect().left - rail.scrollLeft + x
+      },
+    }
+  }, [layout, handLayoutRef, handTrayRef])
 
   // What is off each edge. Derived from the known x values rather than from the
   // DOM, throttled to a frame, and written to state only when a count actually

@@ -606,7 +606,12 @@ export function callUno(game, playerId, playerName) {
  * should start a PENALTY_TIMEOUT_MS timer and call `forceResolvePenalty` if it expires.
  */
 export function catchUno(game, challengerId, targetPlayerId) {
-  if (game.pendingCatchPenalty) return fail('a penalty is already being resolved')
+  // Two people tapping Catch at once is the common case, not an edge case, so the
+  // reason has to name who won the race -- it is shown to the person who lost.
+  const open = game.pendingCatchPenalty
+  if (open) {
+    return fail(`${open.challengerName} already caught ${open.targetPlayerName}`)
+  }
 
   const targetHand = handOf(game, targetPlayerId)
   const target = game.players.find((p) => p.id === targetPlayerId)
@@ -630,6 +635,10 @@ export function catchUno(game, challengerId, targetPlayerId) {
     targetPlayerName: target.name,
     giverIds: givers.map((p) => p.id),
     givenCards: new Map(),
+    // Givers whose card was chosen for them, and why. Both are reported when the
+    // penalty resolves -- a card leaving your hand is never allowed to be silent.
+    substitutedGivers: new Set(),
+    autoPickedGivers: new Set(),
   }
   game.actionMessage = `🚨 ${challengerName} caught ${target.name}! Active players are choosing a card to give...`
 
@@ -657,16 +666,22 @@ export function catchUno(game, challengerId, targetPlayerId) {
 
 /**
  * Record one giver's chosen card, resolving the penalty once everyone has answered.
- * An unrecognised card falls back to the giver's first card rather than stalling.
+ *
+ * A card that is not in the giver's hand falls back to their first card rather than
+ * stalling the match -- but it is recorded as a substitution, because "the card you
+ * picked is not the card that left your hand" is exactly the kind of thing that must
+ * never happen quietly.
  */
 export function submitPenaltyCard(game, giverId, card, penaltyId) {
   const penalty = game.pendingCatchPenalty
   if (!penalty || penalty.penaltyId !== penaltyId) return fail('no matching pending penalty')
 
   const giverHand = handOf(game, giverId)
-  const validCard = giverHand.find((c) => c.id === card?.id) || giverHand[0]
+  const chosen = giverHand.find((c) => c.id === card?.id)
+  const validCard = chosen || giverHand[0]
   if (!validCard) return fail(`giver ${giverId} has no cards`)
 
+  if (!chosen) penalty.substitutedGivers.add(giverId)
   penalty.givenCards.set(giverId, validCard)
 
   const allSubmitted = penalty.giverIds.every((id) => penalty.givenCards.has(id))
@@ -676,7 +691,11 @@ export function submitPenaltyCard(game, giverId, card, penaltyId) {
   return done()
 }
 
-/** Auto-pick a first card for anyone who has not answered, then resolve. */
+/**
+ * Auto-pick a first card for anyone who has not answered, then resolve. One player
+ * sitting on the modal must not be able to stall the match -- but whoever had a card
+ * taken for them is named in the resolution.
+ */
 export function forceResolvePenalty(game) {
   const penalty = game.pendingCatchPenalty
   if (!penalty) return fail('no pending penalty')
@@ -684,7 +703,10 @@ export function forceResolvePenalty(game) {
   penalty.giverIds.forEach((giverId) => {
     if (!penalty.givenCards.has(giverId)) {
       const hand = handOf(game, giverId)
-      if (hand.length > 0) penalty.givenCards.set(giverId, hand[0])
+      if (hand.length > 0) {
+        penalty.givenCards.set(giverId, hand[0])
+        penalty.autoPickedGivers.add(giverId)
+      }
     }
   })
   return finalizeCatchPenalty(game)
@@ -695,7 +717,15 @@ export function finalizeCatchPenalty(game) {
   const penalty = game.pendingCatchPenalty
   if (!penalty) return fail('no pending penalty')
 
-  const { targetPlayerId, targetPlayerName, challengerName, giverIds, givenCards } = penalty
+  const {
+    targetPlayerId,
+    targetPlayerName,
+    challengerName,
+    giverIds,
+    givenCards,
+    substitutedGivers,
+    autoPickedGivers,
+  } = penalty
   const penaltyCards = []
   const finishedGivers = []
 
@@ -730,9 +760,22 @@ export function finalizeCatchPenalty(game) {
     advanceTurn(game, 1)
   }
 
+  const nameList = (ids) =>
+    [...ids]
+      .map((id) => game.players.find((p) => p.id === id)?.name)
+      .filter(Boolean)
+      .join(', ')
+
   let message = `🚨 ${challengerName} caught ${targetPlayerName}! Received 1 card from each active player (+${penaltyCards.length} cards)!`
   if (finishedGivers.length > 0) {
     message += ` 🏆 ${finishedGivers.map((p) => p.name).join(', ')} gave away their last card and finished the game!`
+  }
+  // A card chosen for you always says so.
+  if (autoPickedGivers?.size > 0) {
+    message += ` ⏱ Time ran out for ${nameList(autoPickedGivers)} — a card was picked for them.`
+  }
+  if (substitutedGivers?.size > 0) {
+    message += ` ${nameList(substitutedGivers)}'s pick never reached the host, so another card went instead.`
   }
   if (!matchOver) {
     game.actionMessage = message
