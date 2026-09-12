@@ -14,6 +14,7 @@ import UnoStatusLine from './board/UnoStatusLine'
 import UnoSpectatorPanel from './board/UnoSpectatorPanel'
 import UnoHandTray from './board/UnoHandTray'
 import { playClickSound } from '../../../utils/sound'
+import { cx } from '../../../components/ui/tokens'
 
 const EMPTY_HAND = []
 const EMPTY_SET = new Set()
@@ -190,7 +191,6 @@ export default function UnoBoard({
         <UnoSeats
           players={players}
           currentPlayerIndex={currentPlayerIndex}
-          nextPlayerIndex={nextPlayerIndex}
           direction={direction}
           myPlayer={myPlayer}
           handCards={handCards}
@@ -243,8 +243,15 @@ export default function UnoBoard({
         />
       </div>
 
-      {/* 3. Your hand */}
-      <div className="relative z-10 w-full pt-2 pb-1 border-t border-edge">
+      {/* 3. Your hand. The rule above it lights and the band rises while it is
+          your turn -- the third wordless statement of whose go it is, after the
+          spotlit seat and the hand opening around what you can play. */}
+      <div
+        className={cx(
+          'relative z-10 w-full pt-2 pb-1 border-t transition-transform duration-300',
+          isCurrentTurnForMe ? 'border-turn/70 uno-hand-live -translate-y-1.5' : 'border-edge'
+        )}
+      >
         {isSpectating ? (
           <UnoSpectatorPanel
             myPlayerRank={myPlayerRank}

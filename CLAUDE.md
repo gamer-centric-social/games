@@ -108,6 +108,18 @@ The light is never the only signal. Red/green is UNO's classic accessibility fai
 an ambient colour makes it worse, so the live colour is always also named in words beside
 the discard, and every card keeps its numeral plus two corner indices.
 
+Whose turn it is is also said only in light and geometry, three times over: `.uno-seat-spot`
+puts the lamp on the active seat (there are two seat states, lit or in shadow -- a third
+"next" tone is what made the first two hard to separate), `.uno-hand-live` lights the rule
+above your hand, and **your hand opens around what you can play**. That last one is
+`handLayout.js`: a card's slot is decided by whether it is playable, so an even shingle of
+unreadable 33px slivers becomes wide slots for the cards you are choosing between and ribs
+for the rest. Do not flatten it back to a uniform step -- it is what makes a twelve-card
+hand legible, and it is why every tappable card is big enough to tap. An out-of-play card
+is darkened with an overlay, never faded: opacity makes a shingled card translucent and
+you see the card underneath it. None of this reaches a screen reader, which is what the
+`aria-live` region in `UnoStatusLine` is for.
+
 The sub-14px range is `text-nano` (10px) / `text-micro` (11px) / `text-mini` (12px). 10px
 is the floor. Do not reach for an arbitrary `text-[9px]`; there used to be 118 of those.
 
@@ -136,7 +148,7 @@ closures inside network callbacks and timers. Keep it that way.
 
 ## Before claiming a change works
 
-Run `npm test` (290 tests) and `npm run lint`. The engine tests exist because the UNO
+Run `npm test` (307 tests) and `npm run lint`. The engine tests exist because the UNO
 rules and the Tank collision maths are easy to break silently.
 
 Where the coverage is:
@@ -149,6 +161,7 @@ Where the coverage is:
 | `uno/utils/unoAi.js` | 23 |
 | `uno/utils/turnOrder.js` | 16 |
 | `uno/utils/drawFlightGeometry.js` | 10 |
+| `uno/utils/handLayout.js` | 17 |
 | `tank/engine/tankSimulation.js` | 53 |
 | `tank/utils/tankPhysics.js` | 33 |
 | `tank/utils/arenaGeometry.js` | 14 |
