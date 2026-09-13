@@ -23,7 +23,7 @@ export default function useDrawAnimation({
   handCards,
   drawPileRef,
   handTrayRef,
-  onCardsDrawn,
+  handLayoutRef,
   spacing,
 }) {
   const [flyingCards, setFlyingCards] = useState([])
@@ -33,11 +33,6 @@ export default function useDrawAnimation({
   const hasInitializedHandRef = useRef(false)
   const highlightTimerRef = useRef(null)
   const flightTimersRef = useRef(new Set())
-
-  const onCardsDrawnRef = useRef(onCardsDrawn)
-  useEffect(() => {
-    onCardsDrawnRef.current = onCardsDrawn
-  }, [onCardsDrawn])
 
   // How far apart the tray is currently spacing its cards. Held in a ref so a
   // resize cannot re-fire the draw effect -- the effect is triggered by cards
@@ -92,10 +87,12 @@ export default function useDrawAnimation({
     prevHandCardIdsRef.current = currentIds
     if (addedCards.length === 0) return
 
-    // Drop any sort so the new cards are visible where they land, and bring the
-    // start of the tray into view.
-    onCardsDrawnRef.current?.()
-    handTrayRef.current?.scrollTo({ left: 0, behavior: 'smooth' })
+    // The sort is deliberately left alone. This used to drop it, so that a drawn
+    // card appeared at the left end where the flight was aiming -- which meant the
+    // hand you had arranged came apart every time you drew. Instead the tray brings
+    // the card's slot into view now, before the flight is aimed at it.
+    const handLayout = handLayoutRef?.current
+    addedCards.forEach((c) => handLayout?.reveal?.(c.id))
 
     setNewlyDrawnCardIds(new Set(addedCards.map((c) => c.id)))
     if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
@@ -111,6 +108,10 @@ export default function useDrawAnimation({
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
       spacing: spacingRef.current,
+      // Where each of these cards actually ended up. Read after the reveal above, so
+      // the target is the card's final position rather than the one it had before
+      // the rail scrolled to it.
+      landingXs: addedCards.map((c) => handLayout?.viewportX?.(c.id)),
     })
 
     addedCards.forEach((card, index) => {
@@ -143,7 +144,7 @@ export default function useDrawAnimation({
         }, index * CARD_STAGGER_MS)
       )
     })
-  }, [handCards, drawPileRef, handTrayRef, trackTimer])
+  }, [handCards, drawPileRef, handTrayRef, handLayoutRef, trackTimer])
 
   // Derived rather than stored, so a badge can never outlive the card it is
   // attached to -- playing a highlighted card, or the hand emptying at the end

@@ -88,5 +88,31 @@ describe('computeFlightPath - targets', () => {
         expect(targets.map((t) => t.x)).toEqual([12, 60])
       }
     })
+
+    // A sorted hand puts a drawn card wherever its colour or number belongs, which
+    // is not where an even spread from the left edge would have aimed.
+    it('lands a card on its real slot when the tray knows where that is', () => {
+      const { targets } = computeFlightPath({
+        drawRect: rect(400, 300), trayRect: rect(0, 700), count: 2, ...VIEW,
+        spacing: 30, landingXs: [180, 240],
+      })
+      expect(targets.map((t) => t.x)).toEqual([180, 240])
+    })
+
+    it('fills in the even spread for any card the tray could not place', () => {
+      const { targets } = computeFlightPath({
+        drawRect: rect(400, 300), trayRect: rect(0, 700), count: 3, ...VIEW,
+        spacing: 30, landingXs: [180, undefined],
+      })
+      expect(targets.map((t) => t.x)).toEqual([180, 42, 72])
+    })
+
+    it('still keeps a known slot inside the viewport', () => {
+      const { targets } = computeFlightPath({
+        drawRect: rect(400, 300), trayRect: rect(0, 700), count: 1, ...VIEW,
+        landingXs: [9999],
+      })
+      expect(targets[0].x).toBe(VIEW.viewportWidth - 85)
+    })
   })
 })

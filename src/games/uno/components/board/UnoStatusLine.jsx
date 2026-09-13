@@ -17,6 +17,10 @@ import { cx } from '../../../../components/ui/tokens'
  * and your playable cards have lifted out of your hand -- the screen has said
  * it twice already, and saying it a third time in a pulsing banner was the
  * loudest thing on the old board.
+ *
+ * Every one of those signals is light and geometry, though, so none of them
+ * reaches a screen reader. That is what the live region is for: the turn is
+ * announced, and nothing is drawn.
  */
 function UnoStatusLine({
   isSpectating,
@@ -71,7 +75,16 @@ function UnoStatusLine({
   }
 
   return (
-    <div className="relative z-10 h-9 flex items-center justify-center px-4">
+    <div
+      role="status"
+      aria-live="polite"
+      className="relative z-10 h-9 flex items-center justify-center px-4"
+    >
+      {/* Only your own turn, and only when the visible line is not already saying
+          something. Every other case is named in the line below, which a screen
+          reader reads from this same live region -- announcing it twice is worse
+          than not announcing it at all. */}
+      <span className="sr-only">{isCurrentTurnForMe && !text ? 'Your turn.' : ''}</span>
       {text && (
         <p
           className={cx(

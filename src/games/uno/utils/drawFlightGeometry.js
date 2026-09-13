@@ -30,6 +30,10 @@ const FALLBACK_TRAY_BOTTOM = 130
  * @param {number}      p.viewportWidth
  * @param {number}      p.viewportHeight
  * @param {number}     [p.spacing]   px between landing slots; defaults to 48
+ * @param {number[]}   [p.landingXs] viewport x of each drawn card's real slot, when
+ *                                   the tray has measured one -- a sorted hand puts a
+ *                                   drawn card in the middle of the row, not at the
+ *                                   left end where the even spread aims
  * @returns {{ startX: number, startY: number, targets: {x: number, y: number}[] }}
  */
 export function computeFlightPath({
@@ -39,6 +43,7 @@ export function computeFlightPath({
   viewportWidth,
   viewportHeight,
   spacing,
+  landingXs,
 }) {
   const step = Number.isFinite(spacing) && spacing > 0 ? spacing : CARD_SPACING
   const startX = drawRect
@@ -52,7 +57,10 @@ export function computeFlightPath({
 
   const targets = []
   for (let index = 0; index < count; index++) {
-    const unclamped = trayRect
+    const known = landingXs?.[index]
+    const unclamped = Number.isFinite(known)
+      ? known
+      : trayRect
       ? trayRect.left + TRAY_INSET + index * step
       : FALLBACK_TRAY_INSET + index * step
     targets.push({

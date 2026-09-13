@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ArrowRight, ArrowLeft, Hand } from 'lucide-react'
 import { getRankBadge } from '../../constants/unoConstants'
 import { isFinishedPlayer } from '../../utils/turnOrder'
@@ -15,18 +15,32 @@ import { FOCUS, cx } from '../../../../components/ui/tokens'
  *
  * Direction is carried by the arrows between the seats rather than by a pill
  * announcing "Clockwise", so the structure says it instead of the copy.
+ *
+ * There used to be three states -- lit, next, unlit -- which on a phone is
+ * three slightly different 74px chips, and the third tone was what made the
+ * first two hard to tell apart. Two states now: under the light, or in shadow.
+ * Who is next is already carried by the arrows.
  */
 
-function Seat({ player, isActive, isMine, isNext, count, finished, calledUno, skipped, onCatch }) {
+function Seat({ player, isActive, isMine, count, finished, calledUno, skipped, onCatch }) {
   const rank = finished ? getRankBadge(player.rank) : null
   const catchable = Boolean(onCatch)
+  // One tap, one catch. A phone double-tap used to send the action twice, and the
+  // second one came back as "someone already caught them" -- about yourself. Rearmed
+  // during render when the seat stops being catchable, not in an effect.
+  const [caught, setCaught] = useState(false)
+  const [wasCatchable, setWasCatchable] = useState(catchable)
+  if (catchable !== wasCatchable) {
+    setWasCatchable(catchable)
+    if (!catchable) setCaught(false)
+  }
 
   const body = (
     <>
       <span
         className={cx(
           'w-9 h-9 rounded-full flex items-center justify-center text-lg shrink-0 relative',
-          isActive ? 'bg-felt-high shadow-lift-1' : 'bg-well shadow-sink',
+          isActive ? 'bg-felt-high shadow-lift-1' : 'bg-well shadow-sink opacity-45',
           finished && 'opacity-60'
         )}
       >
@@ -42,7 +56,7 @@ function Seat({ player, isActive, isMine, isNext, count, finished, calledUno, sk
         <span
           className={cx(
             'block text-nano font-bold truncate',
-            isActive ? 'text-ink' : 'text-ink-muted'
+            isActive ? 'text-ink' : 'text-ink-faint'
           )}
         >
           {isMine ? 'You' : player.name}
@@ -61,23 +75,37 @@ function Seat({ player, isActive, isMine, isNext, count, finished, calledUno, sk
   )
 
   const shell = cx(
-    'w-[74px] shrink-0 px-1.5 py-2 rounded-object border flex flex-col items-center gap-1.5',
+    'relative w-[74px] shrink-0 px-1.5 py-2 rounded-object border flex flex-col items-center gap-1.5',
     'transition-colors duration-200',
-    isActive
-      ? 'bg-felt border-turn/60 shadow-lift-2'
-      : isNext
-      ? 'bg-felt/60 border-edge-lit shadow-lift-0'
-      : 'bg-transparent border-transparent'
+    isActive ? 'bg-felt border-turn/60 shadow-lift-2' : 'bg-transparent border-transparent'
   )
+
+  // The lamp, falling on whoever is up. Behind the seat's own content, so the
+  // avatar and the count stay crisp on top of it.
+  const spot = isActive ? <span className="uno-seat-spot" aria-hidden="true" /> : null
 
   // Catching is an action, so it gets a control. It used to be an undocumented
   // tap on any avatar, validated only after the fact -- so the only way to
   // find it was to tap someone and read the rejection.
   if (catchable) {
     return (
-      <button type="button" onClick={onCatch} className={cx(shell, 'cursor-pointer', FOCUS)}>
+      <button
+        type="button"
+        disabled={caught}
+        onClick={() => {
+          setCaught(true)
+          onCatch()
+        }}
+        className={cx(shell, !caught && 'cursor-pointer', FOCUS)}
+      >
+        {spot}
         {body}
-        <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-uno text-table text-nano font-bold uppercase">
+        <span
+          className={cx(
+            'flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-nano font-bold uppercase',
+            caught ? 'bg-uno/30 text-ink-faint' : 'bg-uno text-table'
+          )}
+        >
           <Hand className="w-2.5 h-2.5" />
           Catch
         </span>
@@ -87,6 +115,7 @@ function Seat({ player, isActive, isMine, isNext, count, finished, calledUno, sk
 
   return (
     <div className={shell}>
+      {spot}
       {body}
       {calledUno && !finished && (
         <span className="px-1.5 py-0.5 rounded-full bg-uno/15 border border-uno/40 text-uno text-nano font-bold uppercase">
@@ -102,7 +131,6 @@ const MemoSeat = React.memo(Seat)
 function UnoSeats({
   players,
   currentPlayerIndex,
-  nextPlayerIndex,
   direction,
   myPlayer,
   handCards,
@@ -146,7 +174,6 @@ function UnoSeats({
                   player={p}
                   isActive={isActive}
                   isMine={isMine}
-                  isNext={index === nextPlayerIndex}
                   count={count}
                   finished={finished}
                   calledUno={calledUno}

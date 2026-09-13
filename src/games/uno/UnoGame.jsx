@@ -52,6 +52,9 @@ import {
  * anyone had called UNO -- which invalidated both of UnoBoard's memos, every
  * action, for nothing.
  */
+/** Engine reasons are sentence fragments; the status line shows sentences. */
+const capitalise = (text) => (text ? text.charAt(0).toUpperCase() + text.slice(1) : text)
+
 function sameMembers(a, b) {
   if (a === b) return true
   if (!a || !b || a.size !== b.size) return false
@@ -122,6 +125,11 @@ export default function UnoGame({
    * having called UNO. Shared: both modes drive the same modal, so it lives here rather
    * than inside either game loop. `mode` says which one is currently using it.
    */
+  // Your hand's sort lives here rather than in the board, so it survives the board
+  // unmounting at the end of a round. It changes when you change it, and at no other
+  // time -- drawing a card used to silently reset it.
+  const [handSortMode, setHandSortMode] = useState('none') // 'none' | 'color' | 'number'
+
   const [penaltyGiveCardModal, setPenaltyGiveCardModal] = useState({
     isOpen: false,
     mode: 'ai', // 'ai' | 'mp'
@@ -421,6 +429,7 @@ export default function UnoGame({
                 targetPlayerId: event.targetPlayerId,
                 targetPlayerName: event.targetPlayerName,
                 challengerId: event.challengerId,
+              challengerName: event.challengerName,
                 botGifts: [],
               })
             }
@@ -454,13 +463,26 @@ export default function UnoGame({
    * A rejected action changes nothing and is not broadcast.
    */
   const runHostAction = useCallback(
-    (action) => {
+    (action, origin = null) => {
       const g = hostGameRef.current
       if (!g) return false
 
       const result = action(g)
       if (!result.ok) {
         console.warn('[Host] rejected action:', result.reason)
+        // A refusal used to stop here, on the host's console. The person who tapped
+        // saw their button do nothing at all -- which is what made losing a race to
+        // catch someone look like a broken button. Tell them why.
+        if (origin && result.reason) {
+          if (origin.playerId === HOST_PLAYER_ID) {
+            setMpActionMessage(capitalise(result.reason))
+          } else if (origin.peerId) {
+            hostNetworkRef.current?.sendTo(origin.peerId, {
+              type: 'ACTION_REJECTED',
+              reason: capitalise(result.reason),
+            })
+          }
+        }
         return false
       }
 
@@ -498,8 +520,8 @@ export default function UnoGame({
   )
 
   const hostProcessCatchUno = useCallback(
-    (challengerId, targetPlayerId) =>
-      runHostAction((g) => catchUno(g, challengerId, targetPlayerId)),
+    (challengerId, targetPlayerId, origin = null) =>
+      runHostAction((g) => catchUno(g, challengerId, targetPlayerId), origin),
     [runHostAction]
   )
 
@@ -648,7 +670,7 @@ export default function UnoGame({
       } else if (data.type === 'ACTION_CALL_UNO') {
         hostProcessCallUno(playerId, player?.name || data.playerName || 'Player')
       } else if (data.type === 'ACTION_CATCH_UNO') {
-        hostProcessCatchUno(playerId, data.targetPlayerId)
+        hostProcessCatchUno(playerId, data.targetPlayerId, { playerId, peerId: clientPeerId })
       } else if (data.type === 'ACTION_SUBMIT_PENALTY_CARD') {
         hostProcessSubmitPenaltyCard(playerId, data.card, data.penaltyId)
       } else if (data.type === 'ACTION_REQUEST_SYNC') {
@@ -1078,6 +1100,8 @@ export default function UnoGame({
           playUnoCallSound()
           setMpUnoCalledPlayers((prev) => new Set(prev).add(data.playerId))
           setMpActionMessage(`🔔 ${data.playerName} shouted UNO!`)
+        } else if (data.type === 'ACTION_REJECTED') {
+          setMpActionMessage(data.reason)
         } else if (data.type === 'PENALTY_CARD_REQUEST') {
           if (data.giverIds && data.giverIds.includes(myPlayerIdRef.current)) {
             setPenaltyGiveCardModal({
@@ -1087,6 +1111,7 @@ export default function UnoGame({
               targetPlayerId: data.targetPlayerId,
               targetPlayerName: data.targetPlayerName,
               challengerId: data.challengerId,
+              challengerName: data.challengerName,
               botGifts: [],
             })
           }
@@ -1261,7 +1286,9 @@ export default function UnoGame({
       }
 
       if (mpRoomState.isHost) {
-        hostProcessCatchUno(myPlayerIdRef.current, targetPlayerId)
+        hostProcessCatchUno(myPlayerIdRef.current, targetPlayerId, {
+          playerId: myPlayerIdRef.current,
+        })
       } else if (clientNetworkRef.current) {
         clientNetworkRef.current.sendAction({
           type: 'ACTION_CATCH_UNO',
@@ -1541,6 +1568,8 @@ export default function UnoGame({
         <UnoBoard
           players={aiPlayers}
           rankings={aiRankings}
+          handSortMode={handSortMode}
+          onCycleSort={setHandSortMode}
           currentPlayerIndex={aiCurrentPlayerIndex}
           direction={aiDirection}
           topCard={aiTopCard}
@@ -1574,6 +1603,8 @@ export default function UnoGame({
           winner={aiWinner}
           players={aiPlayers}
           rankings={aiRankings}
+          handSortMode={handSortMode}
+          onCycleSort={setHandSortMode}
           myPlayerId={0}
           onPlayAgain={handlePlayAgainAi}
           onResetToLobby={() => setScreen('ai_lobby')}
@@ -1597,6 +1628,8 @@ export default function UnoGame({
         <UnoBoard
           players={mpPlayers}
           rankings={mpRankings}
+          handSortMode={handSortMode}
+          onCycleSort={setHandSortMode}
           currentPlayerIndex={mpCurrentPlayerIndex}
           direction={mpDirection}
           topCard={mpTopCard}
@@ -1635,6 +1668,8 @@ export default function UnoGame({
           winner={mpWinner}
           players={mpPlayers}
           rankings={mpRankings}
+          handSortMode={handSortMode}
+          onCycleSort={setHandSortMode}
           myPlayerId={myPlayerId}
           onPlayAgain={mpRoomState.isHost ? handleHostStartGame : undefined}
           onResetToLobby={handleUniversalReturnToLobby}
@@ -1651,6 +1686,8 @@ export default function UnoGame({
       <UnoGiveCardModal
         isOpen={penaltyGiveCardModal.isOpen}
         targetPlayerName={penaltyGiveCardModal.targetPlayerName}
+        challengerName={penaltyGiveCardModal.challengerName}
+        isMyCatch={penaltyGiveCardModal.challengerId === myPlayerId}
         hand={
           penaltyGiveCardModal.mode === 'ai'
             ? (aiPlayers[0]?.hand || [])
