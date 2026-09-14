@@ -15,6 +15,7 @@ import {
   catchUno,
   submitPenaltyCard,
   forceResolvePenalty,
+  publicCatchPenalty,
   SOUNDS,
 } from './hostEngine'
 import { CARD_COLORS, CARD_TYPES } from '../constants/unoConstants'
@@ -724,6 +725,91 @@ describe('catchUno', () => {
     expect(game.players[0].rank).toBe(1)
     expect(game.rankings[0]).toMatchObject({ playerId: 0, rank: 1 })
     expect(game.actionMessage).toMatch(/gave away their last card/)
+  })
+
+  it('finishes a host who gives their last card, even if they try to draw while waiting', () => {
+    // The reported case: the host holds an unplayable red 7 on a blue 3 and it is their
+    // turn. P2 dropped to one card without calling and P1 catches them. The host taps
+    // "Give your last card", then -- with the card still in hand while P1 decides --
+    // tried to draw. The draw used to go through, so the timeout took the red 7 and left
+    // the host sitting on the drawn card, uncalled and catchable.
+    const red7 = num(RED, 7)
+    const game = makeGame([[red7], [num(BLUE, 2), num(GREEN, 9)], [num(YELLOW, 1)]], {
+      topCard: num(BLUE, 3),
+    })
+    const before = totalCards(game)
+
+    catchUno(game, 1, 2)
+    const { penaltyId } = game.pendingCatchPenalty
+    expect(submitPenaltyCard(game, 0, red7, penaltyId).ok).toBe(true)
+
+    const draw = drawCard(game, 0)
+    expect(draw.ok).toBe(false)
+    expect(handOf(game, 0)).toEqual([red7])
+
+    submitPenaltyCard(game, 1, handOf(game, 1)[0], penaltyId)
+
+    expect(handOf(game, 0)).toHaveLength(0)
+    expect(game.players[0].rank).toBe(1)
+    expect(handOf(game, 2)).toHaveLength(3)
+    expect(totalCards(game)).toBe(before)
+  })
+
+  it('freezes playing, drawing and passing until the catch resolves', () => {
+    const game = makeGame([[num(RED, 7), num(RED, 8)], [num(BLUE, 2), num(BLUE, 3)], [num(GREEN, 4)]])
+    game.hasDrawnThisTurn = true
+    catchUno(game, 1, 2)
+    const handBefore = [...handOf(game, 0)]
+
+    const play = playCard(game, 0, handBefore[0].id)
+    const draw = drawCard(game, 0)
+    const pass = passTurn(game, 0)
+
+    for (const result of [play, draw, pass]) {
+      expect(result.ok).toBe(false)
+      expect(result.reason).toContain(game.players[2].name)
+    }
+    expect(handOf(game, 0)).toEqual(handBefore)
+    expect(game.currentPlayerIndex).toBe(0)
+
+    forceResolvePenalty(game)
+    expect(playCard(game, 0, handOf(game, 0).find((c) => c.color === RED).id).ok).toBe(true)
+  })
+
+  it('says who is still to give a card after a partial answer', () => {
+    const game = catchableGame()
+    catchUno(game, 1, 0)
+    submitPenaltyCard(game, 1, handOf(game, 1)[0], game.pendingCatchPenalty.penaltyId)
+
+    expect(game.actionMessage).toMatch(/Waiting for/)
+    expect(game.actionMessage).toContain(game.players[2].name)
+    expect(game.actionMessage).not.toMatch(new RegExp(`Waiting for [^.…]*${game.players[1].name}`))
+  })
+})
+
+describe('publicCatchPenalty', () => {
+  const catchableGame = () =>
+    makeGame([[num(RED, 1)], [num(BLUE, 2), num(BLUE, 3)], [num(GREEN, 4), num(GREEN, 5)]])
+
+  it('is null when nobody is being caught', () => {
+    expect(publicCatchPenalty(catchableGame())).toBeNull()
+  })
+
+  it('describes an open catch without revealing any card', () => {
+    const game = catchableGame()
+    catchUno(game, 1, 0)
+    submitPenaltyCard(game, 2, handOf(game, 2)[0], game.pendingCatchPenalty.penaltyId)
+
+    const summary = publicCatchPenalty(game)
+    expect(summary).toEqual({
+      penaltyId: game.pendingCatchPenalty.penaltyId,
+      targetPlayerId: 0,
+      targetPlayerName: 'P0',
+      challengerId: 1,
+      challengerName: 'P1',
+      giverIds: [1, 2],
+      givenIds: [2],
+    })
   })
 })
 
