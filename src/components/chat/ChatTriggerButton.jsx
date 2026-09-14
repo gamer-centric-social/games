@@ -1,6 +1,7 @@
 import React from 'react'
 import { MessageSquare } from 'lucide-react'
 import IconButton from '../ui/IconButton'
+import ChatUnreadBadge from './ChatUnreadBadge'
 import { cx } from '../ui/tokens'
 
 /**
@@ -21,14 +22,10 @@ export default function ChatTriggerButton({
         <MessageSquare className="w-3.5 h-3.5" />
       </IconButton>
 
-      {unreadCount > 0 && (
-        <span
-          className="absolute -top-1 -right-1 flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-turn text-ink-bright text-nano font-mono font-bold shadow-lift-1 pointer-events-none animate-scaleUp"
-          aria-label={`${unreadCount} unread messages`}
-        >
-          {unreadCount > 9 ? '9+' : unreadCount}
-        </span>
-      )}
+      <ChatUnreadBadge
+        count={unreadCount}
+        className="absolute -top-1 -right-1 shadow-lift-1 pointer-events-none animate-scaleUp"
+      />
     </div>
   )
 }

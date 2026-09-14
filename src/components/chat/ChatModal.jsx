@@ -26,26 +26,27 @@ export default function ChatModal({
   messages = [],
   onSendMessage,
   roomCode = '',
+  tone = 'lamp', // the game's ink -- this modal is shared, so it must not pick one
 }) {
   const [inputText, setInputText] = useState('')
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
   const messageCount = messages.length
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages (nothing to scroll to when empty)
   useEffect(() => {
-    if (open && messageCount >= 0) {
+    if (open && messageCount > 0) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
   }, [messageCount, open])
 
   // Focus input on modal open
   useEffect(() => {
-    if (open) {
-      setTimeout(() => {
-        inputRef.current?.focus()
-      }, 50)
-    }
+    if (!open) return undefined
+    const timer = setTimeout(() => {
+      inputRef.current?.focus()
+    }, 50)
+    return () => clearTimeout(timer)
   }, [open])
 
   const handleSubmit = (e) => {
@@ -73,7 +74,7 @@ export default function ChatModal({
       size="sm"
       eyebrow={
         <div className="flex items-center gap-2">
-          <Pill tone="uno">Chat</Pill>
+          <Pill tone={tone}>Chat</Pill>
           {roomCode && (
             <span className="font-mono text-nano text-ink-faint tracking-wider">
               {roomCode}
@@ -103,7 +104,7 @@ export default function ChatModal({
                 <div key={msg.id} className="flex flex-col items-end">
                   <div
                     className={cx(
-                      'max-w-[85%] px-3 py-2 rounded-object rounded-tr-xs',
+                      'max-w-[85%] px-3 py-2 rounded-object rounded-tr-well',
                       'bg-felt-high border border-edge text-ink text-sm shadow-lift-0 break-words'
                     )}
                   >
@@ -132,7 +133,7 @@ export default function ChatModal({
                   </div>
                   <div
                     className={cx(
-                      'px-3 py-2 rounded-object rounded-tl-xs',
+                      'px-3 py-2 rounded-object rounded-tl-well',
                       'bg-well border border-edge text-ink text-sm shadow-sink break-words'
                     )}
                   >
@@ -166,7 +167,6 @@ export default function ChatModal({
           label="Send message"
           size="md"
           active={Boolean(inputText.trim())}
-          onClick={handleSubmit}
           className="shrink-0"
         >
           <Send className="w-4 h-4 text-ink" />

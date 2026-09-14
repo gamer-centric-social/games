@@ -1829,6 +1829,7 @@ export default function UnoGame({
             messages={chatMessages}
             onSendMessage={handleSendChatMessage}
             roomCode={mpRoomState.roomCode}
+            tone="uno"
           />
           <ChatToastPreview
             toast={chatActiveToast}
