@@ -475,3 +475,62 @@ export function playRadarPingSound() {
   osc.stop(now + 0.2)
 }
 
+
+// Liar's Dice: dice rattling in a cup -- a burst of short, bright clicks
+export function playDiceShakeSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  for (let i = 0; i < 6; i++) {
+    const t = ctx.currentTime + i * 0.045
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'square'
+    osc.frequency.setValueAtTime(900 + Math.random() * 700, t)
+    gain.gain.setValueAtTime(0.05, t)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.03)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(t)
+    osc.stop(t + 0.03)
+  }
+}
+
+// Liar's Dice: every cup lifts at once
+export function playCupLiftSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'triangle'
+  osc.frequency.setValueAtTime(180, ctx.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(420, ctx.currentTime + 0.18)
+  gain.gain.setValueAtTime(0.18, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start()
+  osc.stop(ctx.currentTime + 0.2)
+}
+
+// Liar's Dice: a die taken off the table
+export function playDieLostSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(330, ctx.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + 0.25)
+  gain.gain.setValueAtTime(0.2, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.28)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start()
+  osc.stop(ctx.currentTime + 0.28)
+}
