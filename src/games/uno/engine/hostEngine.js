@@ -217,6 +217,25 @@ export function sanitizePlayers(game) {
   }))
 }
 
+/**
+ * The open catch, safe to send to everyone: who is owed, who still has to give. No card
+ * contents. Clients open and close their give-a-card prompt from this rather than from
+ * one-off messages, which a following state sync used to cancel.
+ */
+export function publicCatchPenalty(game) {
+  const penalty = game.pendingCatchPenalty
+  if (!penalty) return null
+  return {
+    penaltyId: penalty.penaltyId,
+    targetPlayerId: penalty.targetPlayerId,
+    targetPlayerName: penalty.targetPlayerName,
+    challengerId: penalty.challengerId,
+    challengerName: penalty.challengerName,
+    giverIds: [...penalty.giverIds],
+    givenIds: [...penalty.givenCards.keys()],
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Deck
 // ---------------------------------------------------------------------------
@@ -310,6 +329,13 @@ function requireTurn(game, playerId) {
   // A decided match accepts nothing further. The pre-refactor code had no such guard,
   // so a late-arriving message could still mutate a finished game.
   if (game.winner) return 'match is already over'
+
+  // Turns stand still while a catch is collecting cards. A giver's pick is only recorded
+  // until everyone has answered, so a draw in between used to let the timeout take the
+  // picked card and leave its giver on the one they drew -- a player who handed over
+  // their last card and was not finished.
+  const penalty = game.pendingCatchPenalty
+  if (penalty) return `waiting for everyone to give ${penalty.targetPlayerName} a card`
 
   const active = currentPlayer(game)
   if (!active || active.id !== playerId) {
@@ -688,6 +714,15 @@ export function submitPenaltyCard(game, giverId, card, penaltyId) {
   if (allSubmitted) {
     return finalizeCatchPenalty(game)
   }
+
+  // A pick stays in its giver's hand until everyone has answered, so say why nothing
+  // has moved yet.
+  const waitingOn = penalty.giverIds
+    .filter((id) => !penalty.givenCards.has(id))
+    .map((id) => game.players.find((p) => p.id === id)?.name)
+    .filter(Boolean)
+    .join(', ')
+  game.actionMessage = `⏳ Waiting for ${waitingOn} to give ${penalty.targetPlayerName} a card…`
   return done()
 }
 

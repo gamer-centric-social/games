@@ -26,6 +26,7 @@ import {
   submitPenaltyCard,
   finalizeCatchPenalty,
   forceResolvePenalty,
+  publicCatchPenalty,
   PENALTY_TIMEOUT_MS,
   SOUNDS,
 } from './engine/hostEngine'
@@ -269,6 +270,8 @@ export default function UnoGame({
 
   const disconnectTurnTimerRef = useRef(null)
   const penaltyTimeoutRef = useRef(null)
+  // The catch this player last gave a card to (see handleConfirmGiveCardMp).
+  const submittedPenaltyIdRef = useRef(null)
 
   const showRules = isRulesOpen !== undefined ? isRulesOpen : internalRulesOpen
   const handleCloseRules = onCloseRules || (() => setInternalRulesOpen(false))
@@ -358,6 +361,7 @@ export default function UnoGame({
             pendingDrawCount: g.pendingDrawCount || 0,
             pendingStackType: g.pendingStackType || null,
             stackingEnabled: g.stackingEnabled !== false,
+            catchPenalty: publicCatchPenalty(g),
           })
         }
       })
@@ -839,6 +843,7 @@ export default function UnoGame({
               pendingDrawCount: g.pendingDrawCount || 0,
               pendingStackType: g.pendingStackType || null,
               stackingEnabled: g.stackingEnabled !== false,
+              catchPenalty: publicCatchPenalty(g),
             })
           } catch (e) {
             console.error('[Host] Failed to send SYNC_GAME_STATE on reconnect:', e)
@@ -1038,15 +1043,6 @@ export default function UnoGame({
             if (data.rankings.length === 0) {
               hasShownMyCelebrationRef.current = false
               setFinishedCelebration({ isOpen: false, rank: 1, playerName: 'You', activeRemaining: 2 })
-              setPenaltyGiveCardModal({
-                isOpen: false,
-                mode: 'mp',
-                penaltyId: null,
-                targetPlayerId: null,
-                targetPlayerName: '',
-                challengerId: null,
-                botGifts: [],
-              })
             } else {
               const myRankRecord = data.rankings.find((r) => r.playerId === myPlayerIdRef.current)
               if (myRankRecord && !hasShownMyCelebrationRef.current && !data.winner) {
@@ -1061,6 +1057,35 @@ export default function UnoGame({
               }
             }
           }
+
+          // The give-a-card prompt follows the host's snapshot. It used to be opened by
+          // PENALTY_CARD_REQUEST and then closed by the sync right behind it, so no
+          // client ever got to answer and every catch waited out the timeout.
+          const catchPenalty = data.catchPenalty || null
+          const meId = myPlayerIdRef.current
+          const owesCard =
+            catchPenalty &&
+            catchPenalty.giverIds.includes(meId) &&
+            !catchPenalty.givenIds.includes(meId) &&
+            submittedPenaltyIdRef.current !== catchPenalty.penaltyId
+          setPenaltyGiveCardModal((prev) => {
+            if (owesCard) {
+              if (prev.isOpen && prev.mode === 'mp' && prev.penaltyId === catchPenalty.penaltyId) {
+                return prev
+              }
+              return {
+                isOpen: true,
+                mode: 'mp',
+                penaltyId: catchPenalty.penaltyId,
+                targetPlayerId: catchPenalty.targetPlayerId,
+                targetPlayerName: catchPenalty.targetPlayerName,
+                challengerId: catchPenalty.challengerId,
+                challengerName: catchPenalty.challengerName,
+                botGifts: [],
+              }
+            }
+            return prev.isOpen && prev.mode === 'mp' ? { ...prev, isOpen: false } : prev
+          })
 
           if (data.winner) {
             setMpWinner(data.winner)
@@ -1303,6 +1328,9 @@ export default function UnoGame({
   const handleConfirmGiveCardMp = useCallback(
     (selectedCard) => {
       const penaltyId = penaltyGiveCardModal.penaltyId
+      // A sync can land before the host has recorded this pick; it must not reopen
+      // the prompt for a card already given.
+      submittedPenaltyIdRef.current = penaltyId
       if (mpRoomState.isHost) {
         hostProcessSubmitPenaltyCard(HOST_PLAYER_ID, selectedCard, penaltyId)
       } else if (clientNetworkRef.current) {
