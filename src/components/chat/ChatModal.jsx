@@ -25,7 +25,6 @@ export default function ChatModal({
   onClose,
   messages = [],
   onSendMessage,
-  currentUserId,
   roomCode = '',
 }) {
   const [inputText, setInputText] = useState('')
@@ -99,9 +98,7 @@ export default function ChatModal({
           </div>
         ) : (
           messages.map((msg) => {
-            const isMe = msg.senderId === currentUserId
-
-            if (isMe) {
+            if (msg.isOwn) {
               return (
                 <div key={msg.id} className="flex flex-col items-end">
                   <div

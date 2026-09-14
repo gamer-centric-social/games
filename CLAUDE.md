@@ -141,6 +141,12 @@ Never let a client mutate game state locally and assume it sticks. Optimistic lo
 updates are fine — the host's next broadcast is the truth. Never trust a value a client
 sent as game-affecting input without re-deriving or validating it host-side.
 
+Room chat obeys the same rule. The host rebuilds every client `CHAT_MESSAGE` with
+`stampChatPacket` (`services/chat/chatRelay.js`), taking the sender from the seat the
+connection holds, and relays only what its own `ChatService` accepted. Whether a message is
+yours is `msg.isOwn`, set where it was typed -- never `senderId`, because lobby seat ids
+are renumbered when someone leaves.
+
 The host is also a player: `playerId` 0 in UNO, slot `p1` (blue) in Tank.
 
 Host state deliberately lives in a `useRef`, not `useState`, so it is immune to stale
@@ -148,7 +154,7 @@ closures inside network callbacks and timers. Keep it that way.
 
 ## Before claiming a change works
 
-Run `npm test` (319 tests) and `npm run lint`. The engine tests exist because the UNO
+Run `npm test` (344 tests) and `npm run lint`. The engine tests exist because the UNO
 rules and the Tank collision maths are easy to break silently.
 
 Where the coverage is:
@@ -167,6 +173,8 @@ Where the coverage is:
 | `tank/utils/arenaGeometry.js` | 14 |
 | `tank/utils/joystickMath.js` | 12 |
 | `tank/utils/tankHud.js` | 3 |
+| `services/chat/ChatService.js` + `chatTypes.js` | 14 |
+| `services/chat/chatRelay.js` | 11 |
 
 The notable gap is `uno/hooks/useUnoAiGame.js` — solo-vs-AI holds its state in React,
 so it cannot be tested without a renderer. Treat changes there as unverified and play a
