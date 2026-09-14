@@ -19,23 +19,32 @@ export class PeerJsChatTransport extends IChatTransport {
 
   /**
    * Update the send function dynamically (e.g. when connection reconnects)
-   * @param {(data: Object) => void} send
+   * @param {(data: Object) => any} send
    */
   setSendFunction(send) {
-    this.sendFn = send || (() => {})
+    this.sendFn = typeof send === 'function' ? send : null
   }
 
   /**
    * Send a chat envelope to the peer network.
    * @param {Object} message - Chat message envelope
+   * @returns {boolean}
    */
   send(message) {
     if (typeof this.sendFn === 'function') {
-      this.sendFn({
-        type: 'CHAT_MESSAGE',
-        payload: message,
-      })
+      try {
+        const result = this.sendFn({
+          type: 'CHAT_MESSAGE',
+          payload: message,
+        })
+        return result !== false
+      } catch (err) {
+        console.error('[PeerJsChatTransport] Send error:', err)
+        return false
+      }
     }
+    console.warn('[PeerJsChatTransport] Send skipped: no sendFn configured')
+    return false
   }
 
   /**
@@ -56,6 +65,13 @@ export class PeerJsChatTransport extends IChatTransport {
    */
   handleIncoming(packet) {
     if (!packet) return
+    if (this.handlers.size === 0) {
+      console.warn(
+        '[PeerJsChatTransport] Inbound packet dropped: no active message handlers registered',
+        packet
+      )
+      return
+    }
     for (const handler of this.handlers) {
       try {
         handler(packet)

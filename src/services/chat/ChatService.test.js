@@ -155,4 +155,92 @@ describe('ChatService', () => {
 
     expect(chatService.getHistory()).toHaveLength(0)
   })
+
+  it('relays message from client through host to other clients and updates all histories', () => {
+    // 1. Host setup
+    const hostBroadcast = vi.fn()
+    const hostTransport = new PeerJsChatTransport({ send: hostBroadcast })
+    const hostChat = new ChatService({ transport: hostTransport })
+
+    // 2. Client 1 (Mobile) setup
+    const client1SendAction = vi.fn()
+    const client1Transport = new PeerJsChatTransport({ send: client1SendAction })
+    const client1Chat = new ChatService({ transport: client1Transport })
+
+    // 3. Client 2 setup
+    const client2SendAction = vi.fn()
+    const client2Transport = new PeerJsChatTransport({ send: client2SendAction })
+    const client2Chat = new ChatService({ transport: client2Transport })
+
+    // Wiring host broadcast to client 1 and client 2
+    hostBroadcast.mockImplementation((packet) => {
+      client1Transport.handleIncoming(packet)
+      client2Transport.handleIncoming(packet)
+    })
+
+    // Wiring client1 sendAction to host onClientData (as in UnoGame.jsx line 710)
+    client1SendAction.mockImplementation((data) => {
+      // Host receives onClientData:
+      if (data.type === 'CHAT_MESSAGE') {
+        hostTransport.handleIncoming(data)
+        hostBroadcast(data)
+      }
+    })
+
+    // Client 1 sends message
+    client1Chat.sendMessage({
+      text: 'Message from mobile!',
+      senderId: 1,
+      senderName: 'Mobile User',
+      avatar: '📱',
+    })
+
+    // Verify:
+    // Client 1 has 1 message
+    expect(client1Chat.getHistory()).toHaveLength(1)
+    expect(client1Chat.getHistory()[0].text).toBe('Message from mobile!')
+
+    // Host has 1 message
+    expect(hostChat.getHistory()).toHaveLength(1)
+    expect(hostChat.getHistory()[0].text).toBe('Message from mobile!')
+
+    // Client 2 has 1 message
+    expect(client2Chat.getHistory()).toHaveLength(1)
+    expect(client2Chat.getHistory()[0].text).toBe('Message from mobile!')
+  })
+
+  it('supports attaching and detaching transports dynamically', () => {
+    const transport1 = new PeerJsChatTransport()
+    const transport2 = new PeerJsChatTransport()
+    const chatService = new ChatService()
+
+    // Initially no transport attached
+    expect(transport1.handlers.size).toBe(0)
+
+    // Attach transport 1
+    chatService.attachTransport(transport1)
+    expect(transport1.handlers.size).toBe(1)
+
+    // Detach
+    chatService.detachTransport()
+    expect(transport1.handlers.size).toBe(0)
+
+    // Attach transport 2
+    chatService.attachTransport(transport2)
+    expect(transport2.handlers.size).toBe(1)
+
+    // Incoming message on transport 2 arrives
+    transport2.handleIncoming({
+      type: 'CHAT_MESSAGE',
+      payload: {
+        id: 'msg_dyn_1',
+        senderId: 2,
+        senderName: 'Player 2',
+        text: 'Dynamic transport message',
+        timestamp: Date.now(),
+      },
+    })
+    expect(chatService.getHistory()).toHaveLength(1)
+    expect(chatService.getHistory()[0].text).toBe('Dynamic transport message')
+  })
 })

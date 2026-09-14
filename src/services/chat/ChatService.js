@@ -16,18 +16,45 @@ export class ChatService {
    * @param {import('./transports/IChatTransport').IChatTransport} options.transport
    * @param {number} [options.maxHistory]
    */
-  constructor({ transport, maxHistory = MAX_CHAT_HISTORY }) {
-    this.transport = transport
+  constructor({ transport = null, maxHistory = MAX_CHAT_HISTORY } = {}) {
+    this.transport = null
     this.maxHistory = maxHistory
     this.messages = []
     this.seenIds = new Set()
     this.subscribers = new Set()
+    this.unsubscribeTransport = null
 
+    if (transport) {
+      this.attachTransport(transport)
+    }
+  }
+
+  /**
+   * Attach or re-attach a transport instance.
+   * @param {import('./transports/IChatTransport').IChatTransport} transport
+   */
+  attachTransport(transport) {
+    if (this.transport === transport && this.unsubscribeTransport) {
+      return
+    }
+    this.detachTransport()
+    this.transport = transport
     if (this.transport && typeof this.transport.onMessage === 'function') {
       this.unsubscribeTransport = this.transport.onMessage((packet) => {
         this.handleNetworkPacket(packet)
       })
     }
+  }
+
+  /**
+   * Detach the current transport and clean up listeners.
+   */
+  detachTransport() {
+    if (this.unsubscribeTransport) {
+      this.unsubscribeTransport()
+      this.unsubscribeTransport = null
+    }
+    this.transport = null
   }
 
   /**
@@ -73,7 +100,11 @@ export class ChatService {
     this.addMessageToBuffer(envelope)
 
     if (this.transport && typeof this.transport.send === 'function') {
-      this.transport.send(envelope)
+      try {
+        this.transport.send(envelope)
+      } catch (err) {
+        console.error('[ChatService] Error sending envelope via transport:', err)
+      }
     }
 
     this.notifySubscribers(null) // null newMsg because it's locally originated
@@ -155,13 +186,7 @@ export class ChatService {
    * Destroy the service, unbind listeners, and free memory.
    */
   destroy() {
-    if (this.unsubscribeTransport) {
-      this.unsubscribeTransport()
-      this.unsubscribeTransport = null
-    }
-    if (this.transport && typeof this.transport.destroy === 'function') {
-      this.transport.destroy()
-    }
+    this.detachTransport()
     this.subscribers.clear()
     this.messages = []
     this.seenIds.clear()

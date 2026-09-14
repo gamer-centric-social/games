@@ -281,10 +281,11 @@ export default function UnoGame({
   // Chat architecture (P2P WebRTC transport + ChatService)
   const [chatTransport] = useState(() => new PeerJsChatTransport())
   const [chatService] = useState(() => new ChatService({ transport: chatTransport }))
-  const chatServiceRef = useRef(chatService)
+
+  // Guarantee that chatService is always attached to chatTransport across HMR and StrictMode remounts
   useEffect(() => {
-    chatServiceRef.current = chatService
-  }, [chatService])
+    chatService.attachTransport(chatTransport)
+  }, [chatService, chatTransport])
 
   const myMpPlayer =
     mpPlayers.find((p) => p.id === myPlayerId) ||
@@ -330,13 +331,8 @@ export default function UnoGame({
       if (hostNetworkRef.current) hostNetworkRef.current.destroy()
       if (disconnectTurnTimerRef.current) clearTimeout(disconnectTurnTimerRef.current)
       if (penaltyTimeoutRef.current) clearTimeout(penaltyTimeoutRef.current)
-      try {
-        chatService.destroy()
-      } catch {
-        // ignore
-      }
     }
-  }, [chatService])
+  }, [])
 
   // ==========================================
   // 3. MULTIPLAYER WEBRTC GAME ENGINE
@@ -1565,7 +1561,7 @@ export default function UnoGame({
   }, [mpRoomState.isHost, handleHostReturnAllToLobby, handleClientReturnToLobby])
 
   const handleLeaveMpRoom = useCallback(() => {
-    chatServiceRef.current?.clear()
+    chatService.clear()
     closeChat()
     if (disconnectTurnTimerRef.current) {
       clearTimeout(disconnectTurnTimerRef.current)
@@ -1624,7 +1620,7 @@ export default function UnoGame({
     hasShownMyCelebrationRef.current = false
     setFinishedCelebration({ isOpen: false, rank: 1, playerName: 'You', activeRemaining: 2 })
     setScreen('mp_lobby')
-  }, [closeChat])
+  }, [closeChat, chatService])
 
   // Handle color picker selection
   const handleColorSelected = (color) => {

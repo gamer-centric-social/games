@@ -307,7 +307,7 @@ export function initClientPeer({
     isConnected: () => Boolean(hostConn && hostConn.open),
     sendAction: (data) => {
       if (!hostConn || !hostConn.open) {
-        console.warn('[Client] sendAction skipped: hostConn is not open')
+        console.warn('[Client] sendAction skipped: hostConn is not open. Action:', data?.type)
         return false
       }
       try {
