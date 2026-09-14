@@ -44,6 +44,11 @@ import {
   playActionCardSound,
   playUnoCallSound,
 } from '../../utils/sound'
+import { ChatService } from '../../services/chat/ChatService'
+import { PeerJsChatTransport } from '../../services/chat/transports/PeerJsChatTransport'
+import { useChat } from '../../hooks/useChat'
+import ChatModal from '../../components/chat/ChatModal'
+import ChatToastPreview from '../../components/chat/ChatToastPreview'
 
 /**
  * Replace a Set-valued piece of state only when its contents actually changed.
@@ -273,6 +278,38 @@ export default function UnoGame({
   // The catch this player last gave a card to (see handleConfirmGiveCardMp).
   const submittedPenaltyIdRef = useRef(null)
 
+  // Chat architecture (P2P WebRTC transport + ChatService)
+  const [chatTransport] = useState(() => new PeerJsChatTransport())
+  const [chatService] = useState(() => new ChatService({ transport: chatTransport }))
+  const chatServiceRef = useRef(chatService)
+  useEffect(() => {
+    chatServiceRef.current = chatService
+  }, [chatService])
+
+  const myMpPlayer =
+    mpPlayers.find((p) => p.id === myPlayerId) ||
+    mpRoomState.players?.find((p) => p.id === myPlayerId) || {
+      id: myPlayerId,
+      name: mpRoomState.isHost ? 'Host' : 'Player',
+      avatar: mpRoomState.isHost ? '👑' : '👤',
+    }
+
+  const {
+    messages: chatMessages,
+    isChatOpen,
+    unreadCount: unreadChatCount,
+    activeToast: chatActiveToast,
+    openChat,
+    closeChat,
+    dismissToast,
+    sendMessage: handleSendChatMessage,
+  } = useChat({
+    chatService,
+    currentUserId: myPlayerId,
+    currentUserName: myMpPlayer.name,
+    currentUserAvatar: myMpPlayer.avatar,
+  })
+
   const showRules = isRulesOpen !== undefined ? isRulesOpen : internalRulesOpen
   const handleCloseRules = onCloseRules || (() => setInternalRulesOpen(false))
 
@@ -293,8 +330,13 @@ export default function UnoGame({
       if (hostNetworkRef.current) hostNetworkRef.current.destroy()
       if (disconnectTurnTimerRef.current) clearTimeout(disconnectTurnTimerRef.current)
       if (penaltyTimeoutRef.current) clearTimeout(penaltyTimeoutRef.current)
+      try {
+        chatService.destroy()
+      } catch {
+        // ignore
+      }
     }
-  }, [])
+  }, [chatService])
 
   // ==========================================
   // 3. MULTIPLAYER WEBRTC GAME ENGINE
@@ -665,7 +707,10 @@ export default function UnoGame({
       const player = g.players.find((p) => p.peerId === clientPeerId)
       const playerId = player ? player.id : (data.playerId !== undefined ? data.playerId : g.currentPlayerIndex)
 
-      if (data.type === 'ACTION_PLAY_CARD') {
+      if (data.type === 'CHAT_MESSAGE') {
+        chatTransport.handleIncoming(data)
+        hostNetworkRef.current?.broadcast(data)
+      } else if (data.type === 'ACTION_PLAY_CARD') {
         hostProcessPlayCard(playerId, data.cardId, data.chosenColor, data.card)
       } else if (data.type === 'ACTION_DRAW_CARD') {
         hostProcessDrawCard(playerId)
@@ -684,6 +729,7 @@ export default function UnoGame({
       }
     }
   }, [
+    chatTransport,
     hostProcessPlayCard,
     hostProcessDrawCard,
     hostProcessPassTurn,
@@ -820,6 +866,18 @@ export default function UnoGame({
           console.error('[Host] Failed to send WELCOME:', e)
         }
 
+        const recentChat = chatService.getHistory() || []
+        if (recentChat.length > 0) {
+          try {
+            conn.send({
+              type: 'SYNC_CHAT',
+              payload: recentChat,
+            })
+          } catch (e) {
+            console.warn('[Host] Failed to send SYNC_CHAT:', e)
+          }
+        }
+
         if (result.status === ADMIT.RECONNECTED) {
           // Mid-match: this player needs their own hand back, which only a targeted
           // sync can carry.
@@ -892,6 +950,7 @@ export default function UnoGame({
     })
 
     hostNetworkRef.current = hostPeer
+    chatTransport.setSendFunction((data) => hostPeer.broadcast(data))
   }
 
   // Client joins room
@@ -917,6 +976,9 @@ export default function UnoGame({
       roomCode,
       player: { name, avatar, sessionId: getClientSessionId() },
       onConnected: () => {
+        chatTransport.setSendFunction((data) => {
+          clientNetworkRef.current?.sendAction(data)
+        })
         setMpConnectionStatus('connected')
         setMpRoomState((prev) => ({
           ...prev,
@@ -926,6 +988,10 @@ export default function UnoGame({
         }))
       },
       onData: (data) => {
+        if (data.type === 'CHAT_MESSAGE' || data.type === 'SYNC_CHAT') {
+          chatTransport.handleIncoming(data)
+          return
+        }
         if (data.type === 'ROOM_ERROR') {
           setMpConnectionStatus('disconnected')
           if (clientNetworkRef.current) {
@@ -1172,6 +1238,7 @@ export default function UnoGame({
     })
 
     clientNetworkRef.current = clientPeer
+    chatTransport.setSendFunction((data) => clientPeer.sendAction(data))
   }
 
   // Host starts the match (Host ALWAYS has the first move: currentPlayerIndex = 0)
@@ -1498,6 +1565,8 @@ export default function UnoGame({
   }, [mpRoomState.isHost, handleHostReturnAllToLobby, handleClientReturnToLobby])
 
   const handleLeaveMpRoom = useCallback(() => {
+    chatServiceRef.current?.clear()
+    closeChat()
     if (disconnectTurnTimerRef.current) {
       clearTimeout(disconnectTurnTimerRef.current)
       disconnectTurnTimerRef.current = null
@@ -1555,7 +1624,7 @@ export default function UnoGame({
     hasShownMyCelebrationRef.current = false
     setFinishedCelebration({ isOpen: false, rank: 1, playerName: 'You', activeRemaining: 2 })
     setScreen('mp_lobby')
-  }, [])
+  }, [closeChat])
 
   // Handle color picker selection
   const handleColorSelected = (color) => {
@@ -1649,6 +1718,8 @@ export default function UnoGame({
           onLeaveRoom={handleLeaveMpRoom}
           onBackToModeSelect={() => setScreen('mode_select')}
           roomState={{ ...mpRoomState, stackingEnabled: mpStackingEnabled }}
+          onOpenChat={openChat}
+          unreadChatCount={unreadChatCount}
         />
       )}
 
@@ -1688,6 +1759,8 @@ export default function UnoGame({
           onOpenRules={() => setInternalRulesOpen(true)}
           connectionStatus={mpRoomState.isHost ? 'connected' : mpConnectionStatus}
           onReconnect={mpRoomState.isHost ? undefined : handleReconnectMp}
+          onOpenChat={openChat}
+          unreadChatCount={unreadChatCount}
         />
       )}
 
@@ -1743,6 +1816,25 @@ export default function UnoGame({
           setFinishedCelebration((prev) => ({ ...prev, isOpen: false }))
         }
       />
+
+      {/* In-game and in-lobby chat modal */}
+      {screen.startsWith('mp_') && (
+        <>
+          <ChatModal
+            open={isChatOpen}
+            onClose={closeChat}
+            messages={chatMessages}
+            onSendMessage={handleSendChatMessage}
+            currentUserId={myPlayerId}
+            roomCode={mpRoomState.roomCode}
+          />
+          <ChatToastPreview
+            toast={chatActiveToast}
+            onClick={openChat}
+            onDismiss={dismissToast}
+          />
+        </>
+      )}
     </div>
   )
 }

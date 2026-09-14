@@ -1,5 +1,5 @@
 import React from 'react'
-import { Users, Check, Play, Share2, Crown } from 'lucide-react'
+import { Users, Check, Play, Share2, Crown, MessageSquare } from 'lucide-react'
 import { playClickSound } from '../../../../utils/sound'
 import useCopyFeedback from '../../../../hooks/useCopyFeedback'
 import { buildRoomLink } from '../../../../services/peerConfig'
@@ -11,7 +11,13 @@ import Pill from '../../../../components/ui/Pill'
 import PlayerRow, { Badge, Dot } from '../../../../components/ui/PlayerRow'
 
 /** The waiting room, once you are connected and before the host deals. */
-export default function UnoRoomWaiting({ roomState, onStartGame, onLeaveRoom }) {
+export default function UnoRoomWaiting({
+  roomState,
+  onStartGame,
+  onLeaveRoom,
+  onOpenChat,
+  unreadChatCount = 0,
+}) {
   const isHost = roomState.isHost
   const players = roomState.players || []
   const maxCap = roomState.maxPlayers || 4
@@ -61,6 +67,18 @@ export default function UnoRoomWaiting({ roomState, onStartGame, onLeaveRoom }) 
             )}
             {copiedLink ? 'Link copied' : 'Copy join link'}
           </Button>
+
+          {onOpenChat && (
+            <Button variant="secondary" size="sm" onClick={onOpenChat} className="relative">
+              <MessageSquare className="w-3.5 h-3.5" />
+              Chat
+              {unreadChatCount > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 rounded-full bg-turn text-ink-bright text-nano font-mono font-bold">
+                  {unreadChatCount}
+                </span>
+              )}
+            </Button>
+          )}
         </div>
 
         <div className="flex justify-center">

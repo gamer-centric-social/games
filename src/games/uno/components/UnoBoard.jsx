@@ -55,6 +55,8 @@ export default function UnoBoard({
   rankings = [],
   handSortMode = 'none',
   onCycleSort,
+  onOpenChat = null,
+  unreadChatCount = 0,
 }) {
   const myPlayer = players.find((p) => p.id === myPlayerId) || players[0]
   const myPlayerRank =
@@ -188,6 +190,8 @@ export default function UnoBoard({
           isSyncing={isSyncing}
           onSync={handleHeaderSync}
           onOpenMenu={openMenu}
+          onOpenChat={onOpenChat}
+          unreadChatCount={unreadChatCount}
         />
 
         <UnoSeats

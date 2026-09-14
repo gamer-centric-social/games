@@ -1,6 +1,7 @@
 import React from 'react'
 import { Settings, RefreshCw, Bot } from 'lucide-react'
 import IconButton from '../../../../components/ui/IconButton'
+import ChatTriggerButton from '../../../../components/chat/ChatTriggerButton'
 import { Dot } from '../../../../components/ui/PlayerRow'
 import { cx } from '../../../../components/ui/tokens'
 
@@ -26,6 +27,8 @@ function UnoTopBar({
   isSyncing,
   onSync,
   onOpenMenu,
+  onOpenChat,
+  unreadChatCount = 0,
 }) {
   return (
     <div className="relative z-10 flex items-center justify-between gap-2 pb-2">
@@ -42,6 +45,13 @@ function UnoTopBar({
       )}
 
       <span className="flex items-center gap-1.5">
+        {isMultiplayer && onOpenChat && (
+          <ChatTriggerButton
+            unreadCount={unreadChatCount}
+            onClick={onOpenChat}
+            size="sm"
+          />
+        )}
         {isMultiplayer && onSyncState && (
           <IconButton size="sm" label="Ask the host for the current state" onClick={onSync}>
             <RefreshCw className={cx('w-3.5 h-3.5', isSyncing && 'animate-spin')} />

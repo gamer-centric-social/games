@@ -12,6 +12,8 @@ export default function UnoMultiplayerLobby({
   onLeaveRoom,
   onBackToModeSelect,
   roomState, // { isInRoom, isHost, roomCode, players, maxPlayers, isConnecting, error }
+  onOpenChat,
+  unreadChatCount = 0,
 }) {
   if (roomState?.isInRoom) {
     return (
@@ -19,6 +21,8 @@ export default function UnoMultiplayerLobby({
         roomState={roomState}
         onStartGame={onStartGame}
         onLeaveRoom={onLeaveRoom}
+        onOpenChat={onOpenChat}
+        unreadChatCount={unreadChatCount}
       />
     )
   }
