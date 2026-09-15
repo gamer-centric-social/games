@@ -1,10 +1,9 @@
-import { ARC_KINDS, arcsAt, BAND_KINDS, offsetAt, TAU } from '../engine/gates'
+import { ARC_KINDS, arcsAt, BALL_X, BAND_KINDS, bandsAt, TAU } from '../engine/gates'
 import {
   COLOR_CONFIG,
   RING_STROKE,
   SHAFT_WIDTH,
   SLIDER_HEIGHT,
-  SLIDER_SEGMENT,
   SWATCH_RADIUS,
 } from '../constants/bounceConstants'
 import { drawChamber } from './drawChamber'
@@ -24,7 +23,6 @@ import { drawGlyph } from '../utils/colorGlyphs'
  * would show it -- so the two read the same function and cannot drift.
  */
 
-const SLIDER_WIDTH = SLIDER_SEGMENT * 4
 const hex = (color) => COLOR_CONFIG[color].hex
 const glyphOf = (color) => COLOR_CONFIG[color].glyph
 
@@ -113,31 +111,36 @@ function drawRhythmMark(ctx, element, view, cx, cy) {
   ctx.restore()
 }
 
-/** A slider or a shutter: a band of four colours crossing the shaft. */
+/**
+ * A slider or a shutter: a band of four colours crossing the shaft.
+ *
+ * Where each segment sits comes from `bandsAt`, which is also what resolves the
+ * crossing. This used to lay the strip out here and the engine read it at the
+ * shaft's wall rather than at the centre line where the ball actually is, so the
+ * colour under the notch was never the colour being tested.
+ */
 function drawBandGate(ctx, element, view, t) {
   const sy = view.y(element.y)
   const left = view.x(-SHAFT_WIDTH / 2) + 16
   const right = view.x(SHAFT_WIDTH / 2) - 16
-  const offset = (((offsetAt(element, t) % SLIDER_WIDTH) + SLIDER_WIDTH) % SLIDER_WIDTH)
 
   ctx.save()
   ctx.beginPath()
   ctx.rect(left, sy - SLIDER_HEIGHT / 2, right - left, SLIDER_HEIGHT)
   ctx.clip()
 
-  // Two passes of the strip, so it reads as continuous as it wraps.
-  for (let pass = -1; pass <= 1; pass++) {
-    for (let i = 0; i < 4; i++) {
-      const segLeft = view.x(-SHAFT_WIDTH / 2) + offset + i * SLIDER_SEGMENT + pass * SLIDER_WIDTH
-      ctx.fillStyle = hex(element.colors[i])
-      ctx.fillRect(segLeft, sy - SLIDER_HEIGHT / 2, SLIDER_SEGMENT, SLIDER_HEIGHT)
-      ctx.fillStyle = 'rgba(22,18,15,0.82)'
-      drawGlyph(ctx, glyphOf(element.colors[i]), segLeft + SLIDER_SEGMENT / 2, sy, SLIDER_HEIGHT * 0.8)
-    }
+  for (const band of bandsAt(element, t)) {
+    const x = view.x(band.from)
+    const width = band.to - band.from
+    if (x + width < left || x > right) continue
+    ctx.fillStyle = hex(band.color)
+    ctx.fillRect(x, sy - SLIDER_HEIGHT / 2, width, SLIDER_HEIGHT)
+    ctx.fillStyle = 'rgba(22,18,15,0.82)'
+    drawGlyph(ctx, glyphOf(band.color), x + width / 2, sy, SLIDER_HEIGHT * 0.8)
   }
   ctx.restore()
 
-  drawNotch(ctx, view.x(0), sy + SLIDER_HEIGHT / 2 + 6)
+  drawNotch(ctx, view.x(BALL_X), sy + SLIDER_HEIGHT / 2 + 6)
 }
 
 function drawSwatch(ctx, swatch, view) {

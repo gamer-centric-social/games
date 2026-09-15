@@ -1,6 +1,7 @@
 import {
   CORE_RADIUS,
   RATCHET_DWELL,
+  SHAFT_WIDTH,
   SLIDER_SEGMENT,
 } from '../constants/bounceConstants'
 
@@ -26,11 +27,24 @@ import {
 
 export const TAU = Math.PI * 2
 const QUADRANT = Math.PI / 2
-const SLIDER_WIDTH = SLIDER_SEGMENT * 4
 
 /** A ring is met at the bottom of its circle; a chamber is escaped at the top. */
 export const BOTTOM = -Math.PI / 2
 export const TOP = Math.PI / 2
+
+/**
+ * Where the ball meets everything: the shaft's centre line.
+ *
+ * Its x never changes -- that is what makes one-tap control honest -- so this is
+ * the only place any gate is ever asked what colour it is showing. Naming it is
+ * not ceremony: a sliding gate is laid out from the shaft's *wall*, and reading it
+ * at the wall instead of here is what made every slider in the game unpassable on
+ * the colour you could see.
+ */
+export const BALL_X = 0
+
+/** A sliding gate's four colours repeat every this many world units. */
+export const BAND_PERIOD = SLIDER_SEGMENT * 4
 
 /** The kinds the ball passes through in one instant, as against a chamber. */
 export const GATE_KINDS = new Set(['ring', 'pendulum', 'ratchet', 'slider', 'shutter'])
@@ -110,10 +124,37 @@ export function arcsAt(element, t) {
 }
 
 /**
+ * The segments of a sliding gate at time `t`, as spans of world x.
+ *
+ * The strip is anchored to the shaft's left wall and slides along it, so a segment
+ * is a stretch of world x and not an abstract index. The renderer walks this, and
+ * so does colorAtCrossing, which is the only reason the two can be relied on to
+ * agree about where a colour is.
+ *
+ * Repeated either side of the shaft so the strip reads as continuous where it
+ * wraps, and so the centre line is covered whatever the offset has reached.
+ */
+export function bandsAt(element, t) {
+  const origin = -SHAFT_WIDTH / 2 + wrap(offsetAt(element, t), BAND_PERIOD)
+  const out = []
+  for (let pass = -2; pass <= 2; pass++) {
+    for (let i = 0; i < element.colors.length; i++) {
+      const from = origin + i * SLIDER_SEGMENT + pass * BAND_PERIOD
+      out.push({ color: element.colors[i], from, to: from + SLIDER_SEGMENT })
+    }
+  }
+  return out
+}
+
+/**
  * The colour standing between the ball and the other side, at time `t`.
  *
  * For a chamber this is the ceiling, which is the only part of it that is a gate
  * at all -- the floor irises shut behind you and is never tested.
+ *
+ * A sliding gate is resolved by asking which drawn segment contains the ball,
+ * rather than by a second piece of modular arithmetic that agrees with the first
+ * only until someone edits one of them. That is how this went wrong before.
  */
 export function colorAtCrossing(element, t) {
   switch (element.kind) {
@@ -125,8 +166,8 @@ export function colorAtCrossing(element, t) {
       return arcColorAt(element, t, TOP)
     case 'slider':
     case 'shutter': {
-      const local = wrap(-offsetAt(element, t), SLIDER_WIDTH)
-      return element.colors[Math.floor(local / SLIDER_SEGMENT) % 4]
+      const under = bandsAt(element, t).find((band) => band.from <= BALL_X && BALL_X < band.to)
+      return under ? under.color : element.colors[0]
     }
     default:
       return null
