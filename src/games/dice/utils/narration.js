@@ -73,6 +73,12 @@ export function describeTable(view) {
     return { text: `You're out. ${capitalize(quantityWord(view.playersIn))} still in.`, tone: 'quiet' }
   }
 
+  // The host's forfeit timer is running; the red dots on the seats must not be the only sign of it.
+  const othersIn = view.seats.filter((s) => s.id !== view.yourId && !s.out)
+  if (othersIn.length > 0 && othersIn.every((s) => !s.connected)) {
+    return { text: 'Everyone else dropped out. The table is yours if nobody returns.', tone: 'turn' }
+  }
+
   if (view.turnSeat === view.yourId) {
     if (!view.currentBid) {
       const text =

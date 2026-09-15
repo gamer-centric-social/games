@@ -27,7 +27,6 @@ export default function RevealPanel({ view }) {
 
   const counts = (die) => die === reveal.bid.face || (reveal.wild && die === 1)
   const finished = shown >= reveal.count
-  const met = reveal.count >= reveal.bid.quantity
 
   let verdict
   if (reveal.loserId !== null) verdict = `${nameOf(view, reveal.loserId)} −1 die`
@@ -46,7 +45,12 @@ export default function RevealPanel({ view }) {
         <p
           className={cx(
             'h-5 text-mini font-bold',
-            reveal.loserId === view.yourId ? 'text-danger' : met ? 'text-ok' : 'text-turn'
+            // Colour says what it means for you: red you lost, green you gained, plain otherwise.
+            reveal.loserId === view.yourId
+              ? 'text-danger'
+              : reveal.gainerId === view.yourId
+                ? 'text-ok'
+                : 'text-ink'
           )}
         >
           {finished ? verdict : ''}

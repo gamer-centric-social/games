@@ -59,6 +59,14 @@ describe('describeTable', () => {
     )
   })
 
+  it('warns the last connected player that the table is theirs if nobody returns', () => {
+    const gone = seats.map((s) => (s.id === 1 ? s : { ...s, connected: false }))
+    expect(describeTable(view({ seats: gone }))).toEqual({
+      text: 'Everyone else dropped out. The table is yours if nobody returns.',
+      tone: 'turn',
+    })
+  })
+
   it('tells a knocked-out player how many are left', () => {
     const out = seats.map((s) => (s.id === 1 ? { ...s, out: true } : s))
     expect(describeTable(view({ seats: out, playersIn: 2, turnSeat: 0 })).text).toBe(
