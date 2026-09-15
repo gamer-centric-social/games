@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { generateRoomCode, preloadIceConfig } from '../../../services/peerConfig'
 import { admitPlayer, ADMIT } from '../../../services/room/roomHandshake'
-import { relayClientChat, sendChatHistory, routeClientChat } from '../../../services/room/roomChat'
+import { relayClientChat, sendChatHistory, routeClientChat, broadcastToSeats } from '../../../services/room/roomChat'
 import { diceNetwork } from '../services/diceNetwork'
 import useDiceTable from './useDiceTable'
 import {
@@ -118,7 +118,8 @@ export default function useDiceRoom({ chat }) {
             }),
             0
           )
-          chatTransport.setSendFunction((data) => net.broadcast(data))
+          // Seated players only: net.broadcast would also reach connections that never joined.
+          chatTransport.setSendFunction((data) => broadcastToSeats(table.game?.players ?? [], net.sendTo, data))
           setRoom({ ...IDLE, status: 'in_room', isHost: true, roomCode })
           setUrlRoom(roomCode)
         },
@@ -164,7 +165,8 @@ export default function useDiceRoom({ chat }) {
           const game = table.game
           if (!game) return
           const seat = game.players.find((p) => p.peerId === peerId)
-          if (relayClientChat({ data, seat, chatService, broadcast: net.broadcast })) return
+          const toSeats = (msg) => broadcastToSeats(game.players, net.sendTo, msg)
+          if (relayClientChat({ data, seat, chatService, broadcast: toSeats })) return
           if (!seat) return
 
           const reply = (result) => {

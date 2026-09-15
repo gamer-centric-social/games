@@ -4,8 +4,23 @@ import { stampChatPacket, toWireMessage } from '../chat/chatRelay'
  * The room chat relay, written once for every networked game.
  *
  * UNO wires these steps by hand in UnoGame.jsx; a game on the shared room
- * layer gets them by calling these three functions from its data handlers.
+ * layer gets them by calling these functions from its data handlers.
  */
+
+/**
+ * Host: send to every player who holds a seat and is still connected.
+ *
+ * Use this, not the network's broadcast, for anything a room says to its
+ * players. broadcast reaches every open connection, and a connection is open
+ * before JOIN is admitted -- or after it was refused -- so a stranger with the
+ * room code could otherwise read the room's chat without ever taking a seat.
+ */
+export function broadcastToSeats(players, sendTo, data) {
+  for (const p of players) {
+    if (p.isHost || !p.peerId || p.connected === false) continue
+    sendTo(p.peerId, data)
+  }
+}
 
 /**
  * Host: handle a client's chat packet. Returns true when `data` was chat --

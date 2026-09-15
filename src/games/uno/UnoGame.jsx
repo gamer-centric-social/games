@@ -47,6 +47,7 @@ import {
 } from '../../utils/sound'
 import { ChatService } from '../../services/chat/ChatService'
 import { stampChatPacket, toWireMessage } from '../../services/chat/chatRelay'
+import { broadcastToSeats } from '../../services/room/roomChat'
 import { PeerJsChatTransport } from '../../services/chat/transports/PeerJsChatTransport'
 import { useChat } from '../../hooks/useChat'
 import ChatModal from '../../components/chat/ChatModal'
@@ -341,6 +342,17 @@ export default function UnoGame({
   // ==========================================
 
   // Broadcasts state to all connected clients & updates host UI
+  /**
+   * Host: everything the room says goes to seated, connected players only. The
+   * network's own broadcast reaches every open connection, including a peer that
+   * never sent JOIN or was turned away -- see broadcastToSeats.
+   */
+  const broadcastToRoom = useCallback((data) => {
+    const g = hostGameRef.current
+    const net = hostNetworkRef.current
+    if (g && net) broadcastToSeats(g.players, net.sendTo, data)
+  }, [])
+
   const hostBroadcastGameState = useCallback((customMessage = null) => {
     const g = hostGameRef.current
     if (!g) return
@@ -447,7 +459,7 @@ export default function UnoGame({
             break
 
           case 'BROADCAST':
-            hostNetworkRef.current?.broadcast(event.message)
+            broadcastToRoom(event.message)
             break
 
           case 'CELEBRATE':
@@ -499,7 +511,7 @@ export default function UnoGame({
         }
       }
     },
-    [playEngineSound]
+    [playEngineSound, broadcastToRoom]
   )
 
   /**
@@ -681,7 +693,7 @@ export default function UnoGame({
       g.players = reIndexed
 
       if (hostNetworkRef.current) {
-        hostNetworkRef.current.broadcast({
+        broadcastToRoom({
           type: 'ROOM_UPDATE',
           roomCode: g.roomCode,
           players: publicRoster(g),
@@ -691,7 +703,7 @@ export default function UnoGame({
       }
       setMpRoomState((prev) => ({ ...prev, players: reIndexed }))
     },
-    [hostBroadcastGameState]
+    [hostBroadcastGameState, broadcastToRoom]
   )
 
   // Connect client data ref to latest authoritative processors
@@ -711,7 +723,7 @@ export default function UnoGame({
         // peer or a replayed id goes nowhere.
         const stamped = stampChatPacket(data, player)
         if (stamped && chatService.handleNetworkPacket(stamped)) {
-          hostNetworkRef.current?.broadcast(stamped)
+          broadcastToRoom(stamped)
         }
         return
       }
@@ -738,6 +750,7 @@ export default function UnoGame({
     }
   }, [
     chatService,
+    broadcastToRoom,
     hostProcessPlayCard,
     hostProcessDrawCard,
     hostProcessPassTurn,
@@ -928,7 +941,7 @@ export default function UnoGame({
 
         // Lobby paths: everyone just needs the updated roster.
         setTimeout(() => {
-          hostNetworkRef.current?.broadcast({
+          broadcastToRoom({
             type: 'ROOM_UPDATE',
             roomCode: g.roomCode,
             players: publicRoster(g),
@@ -958,7 +971,7 @@ export default function UnoGame({
     })
 
     hostNetworkRef.current = hostPeer
-    chatTransport.setSendFunction((data) => hostPeer.broadcast(data))
+    chatTransport.setSendFunction((data) => broadcastToRoom(data))
   }
 
   // Client joins room
@@ -1500,7 +1513,7 @@ export default function UnoGame({
     if (!g) return
     resetToLobby(g)
     if (hostNetworkRef.current) {
-      hostNetworkRef.current.broadcast({
+      broadcastToRoom({
         type: 'ROOM_RESET_TO_LOBBY',
         players: publicRoster(g),
       })
@@ -1521,7 +1534,7 @@ export default function UnoGame({
     hasShownMyCelebrationRef.current = false
     setFinishedCelebration({ isOpen: false, rank: 1, playerName: 'You', activeRemaining: 2 })
     setMpActionMessage('Host returned all players to room lobby.')
-  }, [])
+  }, [broadcastToRoom])
 
   const handleClientReturnToLobby = useCallback(() => {
     if (clientNetworkRef.current) {

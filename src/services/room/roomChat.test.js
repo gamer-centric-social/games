@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { ChatService } from '../chat/ChatService'
 import { PeerJsChatTransport } from '../chat/transports/PeerJsChatTransport'
-import { relayClientChat, sendChatHistory, routeClientChat } from './roomChat'
+import { relayClientChat, sendChatHistory, routeClientChat, broadcastToSeats } from './roomChat'
 
 const seat = { id: 1, name: 'Ana', avatar: '🦊' }
 const chat = (id, text = 'hi', extra = {}) => ({
@@ -50,6 +50,26 @@ describe('relayClientChat (host)', () => {
     relayClientChat({ data: chat('msg_1'), seat, chatService, broadcast })
     relayClientChat({ data: chat('msg_1', 'stolen id'), seat, chatService, broadcast })
     expect(broadcast).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('broadcastToSeats (host)', () => {
+  it('reaches connected seated players only -- not the host, not a connection without a seat', () => {
+    const players = [
+      { id: 0, isHost: true, peerId: null },
+      { id: 1, peerId: 'peer-1', connected: true },
+      { id: 2, peerId: 'peer-2', connected: false },
+      { id: 3, peerId: null },
+      { id: 4, peerId: 'peer-4' },
+    ]
+    const sendTo = vi.fn()
+    const packet = { type: 'CHAT_MESSAGE' }
+    broadcastToSeats(players, sendTo, packet)
+
+    expect(sendTo.mock.calls).toEqual([
+      ['peer-1', packet],
+      ['peer-4', packet],
+    ])
   })
 })
 
