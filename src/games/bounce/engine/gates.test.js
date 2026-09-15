@@ -4,6 +4,9 @@ import {
   arcIndexAt,
   arcsAt,
   angleAt,
+  BALL_X,
+  BAND_KINDS,
+  bandsAt,
   BOTTOM,
   colorAtCrossing,
   coreColorAt,
@@ -111,6 +114,20 @@ describe('the renderer and the engine cannot drift apart', () => {
     }
   })
 
+  it('bandsAt puts the strip exactly where colorAtCrossing says it is', () => {
+    // This one was exempted when it was first written -- `if (!element.radius)
+    // continue` skipped precisely the two kinds that had drifted -- and every
+    // slider in the game was a lie for it. See the regression below.
+    for (const [, element] of KINDS) {
+      if (!BAND_KINDS.has(element.kind)) continue
+      for (let t = 0; t < 14; t += 0.07) {
+        const under = bandsAt(element, t).find((b) => b.from <= BALL_X && BALL_X < b.to)
+        expect(under, `no segment over the centre line at t=${t}`).toBeDefined()
+        expect(colorAtCrossing(element, t)).toBe(under.color)
+      }
+    }
+  })
+
   it('walks the arcs once round the circle in order', () => {
     const arcs = arcsAt(SAMPLES.iris, 0)
     expect(arcs.map((a) => a.color)).toEqual(FOUR)
@@ -190,6 +207,41 @@ describe('a ring is met at the bottom and a chamber escaped at the top', () => {
     expect(colorAtCrossing(box, 0)).toBe('pink')
     // Opposite ends of the same circle, so they must not agree.
     expect(colorAtCrossing(box, 0)).not.toBe(arcColorAt(box, 0, BOTTOM))
+  })
+})
+
+describe('a sliding gate is read where the ball actually crosses it', () => {
+  // The regression. The strip is laid out from the shaft's left wall, but the ball
+  // is pinned to the shaft's centre line -- SHAFT_WIDTH / 2 = 300 units along it,
+  // which is where the notch is drawn and where it visibly crosses. Reading the
+  // strip at the wall instead put the tested colour one or two segments left of the
+  // one under the ball at *every* strip position, because 300 is not a multiple of
+  // the 220-unit segment. You could never pass a slider on the colour you could see.
+  it('reads the segment over the centre line, not the one at the wall', () => {
+    const still = { kind: 'slider', colors: FOUR, speed: 0, offset: 0 }
+    // Strip starts flush with the wall at -300, so the centre line falls inside the
+    // second segment. The wall answer, and the old one, would be FOUR[0].
+    expect(colorAtCrossing(still, 0)).toBe(FOUR[1])
+    expect(colorAtCrossing(still, 9.5)).toBe(FOUR[1])
+  })
+
+  it('steps one segment along for each segment the strip slides', () => {
+    const seen = []
+    for (let offset = 0; offset < SLIDER_SEGMENT * 4; offset += SLIDER_SEGMENT) {
+      seen.push(colorAtCrossing({ kind: 'slider', colors: FOUR, speed: 0, offset }, 0))
+    }
+    expect(new Set(seen).size).toBe(4)
+  })
+
+  it('always has a segment over the centre line, however far the strip has run', () => {
+    // The fallback in colorAtCrossing must never be the thing answering.
+    for (const kind of ['slider', 'shutter']) {
+      const element = { ...SAMPLES[kind], kind }
+      for (let t = 0; t < 400; t += 0.31) {
+        const under = bandsAt(element, t).find((b) => b.from <= BALL_X && BALL_X < b.to)
+        expect(under, `${kind} uncovered at t=${t}`).toBeDefined()
+      }
+    }
   })
 })
 

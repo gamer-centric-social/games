@@ -267,9 +267,23 @@ moved, since a record set on a different climb is not a record.
   the colour covering the crossing point — and a ring, pendulum, ratchet, slider and
   shutter are five spellings of that function. A gate drawn a few degrees from where the
   engine will test it is the worst bug available here: you would lose races you had played
-  correctly and no screenshot would show why. Two implementations drift, so there is one,
-  and `gates.test.js` checks `arcsAt` against `arcColorAt` rather than against a
-  hand-written expectation. Same argument as `utils/colorGlyphs.js`.
+  correctly and no screenshot would show why. Two implementations drift, so there is one:
+  `arcsAt` for the circular kinds, `bandsAt` for the sliding ones, and `gates.test.js`
+  checks each against `colorAtCrossing` rather than against a hand-written expectation.
+  Same argument as `utils/colorGlyphs.js`.
+
+  **This is not hypothetical — it shipped.** A sliding gate's strip is laid out from the
+  shaft's *left wall*, but the ball is pinned to the shaft's *centre line*, 300 units
+  along it, which is where the notch is drawn. The engine read the strip at the wall. As
+  300 is not a multiple of the 220-unit segment, the colour tested sat one or two segments
+  left of the one under your ball at **every** strip position, so a slider could never be
+  passed on the colour you could see. It survived from `3122d07` until someone played it,
+  because **every test in this repo consults the engine for truth** — including the
+  autopilot, which probed `stepRun` and cheerfully played the wrong answer. The one guard
+  against the whole class was the drift test, and it opened with `if (!element.radius)
+  continue`, which skipped precisely the two kinds that had drifted. Exempting a kind from
+  that test is how this bug gets back in. `BALL_X` exists so the crossing point is a named
+  thing rather than an implied zero.
 - **`engine/segments.js`** holds the rooms. A course is a stack of them — gauntlet, sweep,
   carousel, ratchet run, chamber, breather — each with its own character and its own
   height, and `courseGen.js` only assembles. Checkpoints land on the seams, which is why
@@ -290,7 +304,7 @@ moved, since a record set on a different climb is not a record.
 
 ## Before claiming a change works
 
-Run `npm test` (690 tests) and `npm run lint`. The engine tests exist because the UNO
+Run `npm test` (694 tests) and `npm run lint`. The engine tests exist because the UNO
 rules and the Tank collision maths are easy to break silently.
 
 Where the coverage is:
@@ -319,7 +333,7 @@ Where the coverage is:
 | `dice/utils/narration.js` | 12 |
 | `dice/utils/diceAi.js` | 5 |
 | `utils/rng.js` | 3 |
-| `bounce/engine/gates.js` | 38 |
+| `bounce/engine/gates.js` | 42 |
 | `bounce/engine/segments.js` | 56 |
 | `bounce/engine/courseGen.js` | 29 |
 | `bounce/engine/bounceEngine.js` | 29 |
