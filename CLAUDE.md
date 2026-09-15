@@ -154,6 +154,17 @@ connection holds, and relays only what its own `ChatService` accepted. Whether a
 yours is `msg.isOwn`, set where it was typed -- never `senderId`, because lobby seat ids
 are renumbered when someone leaves.
 
+Who a client is comes only from its connection. Each of these was once an exploit:
+
+- the acting seat is the one whose `peerId` is the connection -- never a `playerId` in
+  the packet, and a connection with no seat can do nothing;
+- a connection holds at most one seat (`admitPlayer` refuses a second JOIN under another
+  name);
+- rosters sent to clients carry no `peerId` or `sessionId` -- a session id walks straight
+  back into its seat, skipping the liveness probe;
+- anything the room says goes through `broadcastToSeats` (`services/room/roomChat.js`),
+  not the network's `broadcast`, which also reaches connections that never joined.
+
 The host is also a player: `playerId` 0 in UNO and Liar's Dice, slot `p1` (blue) in Tank.
 
 **Liar's Dice is the reference for new networked games.** It is built on
@@ -175,7 +186,7 @@ closures inside network callbacks and timers. Keep it that way.
 
 ## Before claiming a change works
 
-Run `npm test` (456 tests) and `npm run lint`. The engine tests exist because the UNO
+Run `npm test` (466 tests) and `npm run lint`. The engine tests exist because the UNO
 rules and the Tank collision maths are easy to break silently.
 
 Where the coverage is:
@@ -183,8 +194,8 @@ Where the coverage is:
 | Module | Tests |
 |---|---|
 | `uno/utils/deck.js` | 43 |
-| `uno/engine/hostEngine.js` | 72 |
-| `uno/services/unoHandshake.js` | 20 |
+| `uno/engine/hostEngine.js` | 73 |
+| `uno/services/unoHandshake.js` | 24 |
 | `uno/utils/unoAi.js` | 23 |
 | `uno/utils/turnOrder.js` | 16 |
 | `uno/utils/drawFlightGeometry.js` | 13 |
@@ -196,8 +207,8 @@ Where the coverage is:
 | `tank/utils/tankHud.js` | 3 |
 | `services/chat/ChatService.js` + `chatTypes.js` | 14 |
 | `services/chat/chatRelay.js` | 11 |
-| `services/room/roomHandshake.js` | 20 |
-| `services/room/roomChat.js` | 7 |
+| `services/room/roomHandshake.js` | 24 |
+| `services/room/roomChat.js` | 8 |
 | `dice/engine/bidRules.js` | 22 |
 | `dice/engine/diceEngine.js` | 32 |
 | `dice/services/diceTable.js` | 11 |

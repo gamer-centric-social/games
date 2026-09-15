@@ -17,6 +17,7 @@ import {
   resetToLobby,
   isMatchInProgress,
   sanitizePlayers,
+  publicRoster,
   handOf,
   playCard,
   drawCard,
@@ -46,6 +47,7 @@ import {
 } from '../../utils/sound'
 import { ChatService } from '../../services/chat/ChatService'
 import { stampChatPacket, toWireMessage } from '../../services/chat/chatRelay'
+import { broadcastToSeats } from '../../services/room/roomChat'
 import { PeerJsChatTransport } from '../../services/chat/transports/PeerJsChatTransport'
 import { useChat } from '../../hooks/useChat'
 import ChatModal from '../../components/chat/ChatModal'
@@ -340,6 +342,17 @@ export default function UnoGame({
   // ==========================================
 
   // Broadcasts state to all connected clients & updates host UI
+  /**
+   * Host: everything the room says goes to seated, connected players only. The
+   * network's own broadcast reaches every open connection, including a peer that
+   * never sent JOIN or was turned away -- see broadcastToSeats.
+   */
+  const broadcastToRoom = useCallback((data) => {
+    const g = hostGameRef.current
+    const net = hostNetworkRef.current
+    if (g && net) broadcastToSeats(g.players, net.sendTo, data)
+  }, [])
+
   const hostBroadcastGameState = useCallback((customMessage = null) => {
     const g = hostGameRef.current
     if (!g) return
@@ -446,7 +459,7 @@ export default function UnoGame({
             break
 
           case 'BROADCAST':
-            hostNetworkRef.current?.broadcast(event.message)
+            broadcastToRoom(event.message)
             break
 
           case 'CELEBRATE':
@@ -498,7 +511,7 @@ export default function UnoGame({
         }
       }
     },
-    [playEngineSound]
+    [playEngineSound, broadcastToRoom]
   )
 
   /**
@@ -577,7 +590,7 @@ export default function UnoGame({
 
   // Host authoritative handler when a player leaves or disconnects
   const hostProcessClientLeave = useCallback(
-    (clientPeerId, explicitPlayerId = null) => {
+    (clientPeerId) => {
       const g = hostGameRef.current
       if (!g) return
 
@@ -585,9 +598,9 @@ export default function UnoGame({
         hostNetworkRef.current.removeConnection(clientPeerId)
       }
 
-      const player = g.players.find(
-        (p) => p.peerId === clientPeerId || (explicitPlayerId !== null && p.id === explicitPlayerId)
-      )
+      // Only the connection's own seat. A playerId sent with ACTION_LEAVE used to be
+      // honoured too, which let any peer remove any player.
+      const player = g.players.find((p) => p.peerId === clientPeerId)
       if (!player || player.isHost) return
 
       const isGameActive = isMatchInProgress(g) && !g.winner
@@ -680,17 +693,17 @@ export default function UnoGame({
       g.players = reIndexed
 
       if (hostNetworkRef.current) {
-        hostNetworkRef.current.broadcast({
+        broadcastToRoom({
           type: 'ROOM_UPDATE',
           roomCode: g.roomCode,
-          players: reIndexed,
+          players: publicRoster(g),
           maxPlayers: g.maxPlayers || 4,
           stackingEnabled: g.stackingEnabled !== false,
         })
       }
       setMpRoomState((prev) => ({ ...prev, players: reIndexed }))
     },
-    [hostBroadcastGameState]
+    [hostBroadcastGameState, broadcastToRoom]
   )
 
   // Connect client data ref to latest authoritative processors
@@ -700,26 +713,31 @@ export default function UnoGame({
       const g = hostGameRef.current
       if (!g) return
 
-      // Look up player directly by peer connection ID
+      // Who is acting is the seat this connection holds -- never a playerId in the
+      // packet. A peer that holds no seat (never joined, or was turned away) can do
+      // nothing: it used to fall back to data.playerId, or to whoever's turn it was.
       const player = g.players.find((p) => p.peerId === clientPeerId)
-      const playerId = player ? player.id : (data.playerId !== undefined ? data.playerId : g.currentPlayerIndex)
 
       if (data.type === 'CHAT_MESSAGE') {
-        // Who sent it is the seat this connection holds, not what the packet
-        // claims. Only a message the host actually accepted is relayed, so an
-        // unadmitted peer or a replayed id goes nowhere.
+        // Only a message the host actually accepted is relayed, so an unadmitted
+        // peer or a replayed id goes nowhere.
         const stamped = stampChatPacket(data, player)
         if (stamped && chatService.handleNetworkPacket(stamped)) {
-          hostNetworkRef.current?.broadcast(stamped)
+          broadcastToRoom(stamped)
         }
-      } else if (data.type === 'ACTION_PLAY_CARD') {
+        return
+      }
+      if (!player) return
+      const playerId = player.id
+
+      if (data.type === 'ACTION_PLAY_CARD') {
         hostProcessPlayCard(playerId, data.cardId, data.chosenColor, data.card)
       } else if (data.type === 'ACTION_DRAW_CARD') {
         hostProcessDrawCard(playerId)
       } else if (data.type === 'ACTION_PASS_TURN') {
         hostProcessPassTurn(playerId)
       } else if (data.type === 'ACTION_CALL_UNO') {
-        hostProcessCallUno(playerId, player?.name || data.playerName || 'Player')
+        hostProcessCallUno(playerId, player.name)
       } else if (data.type === 'ACTION_CATCH_UNO') {
         hostProcessCatchUno(playerId, data.targetPlayerId, { playerId, peerId: clientPeerId })
       } else if (data.type === 'ACTION_SUBMIT_PENALTY_CARD') {
@@ -727,11 +745,12 @@ export default function UnoGame({
       } else if (data.type === 'ACTION_REQUEST_SYNC') {
         hostBroadcastGameState('Host synchronized game state.')
       } else if (data.type === 'ACTION_LEAVE') {
-        hostProcessClientLeave(clientPeerId, data.playerId)
+        hostProcessClientLeave(clientPeerId)
       }
     }
   }, [
     chatService,
+    broadcastToRoom,
     hostProcessPlayCard,
     hostProcessDrawCard,
     hostProcessPassTurn,
@@ -858,7 +877,7 @@ export default function UnoGame({
           type: 'WELCOME',
           playerId: result.player.id,
           roomCode: g.roomCode,
-          players: g.players,
+          players: publicRoster(g),
           maxPlayers: g.maxPlayers || 4,
           stackingEnabled: g.stackingEnabled !== false,
         }
@@ -922,10 +941,10 @@ export default function UnoGame({
 
         // Lobby paths: everyone just needs the updated roster.
         setTimeout(() => {
-          hostNetworkRef.current?.broadcast({
+          broadcastToRoom({
             type: 'ROOM_UPDATE',
             roomCode: g.roomCode,
-            players: g.players,
+            players: publicRoster(g),
             maxPlayers: g.maxPlayers || 4,
             stackingEnabled: g.stackingEnabled !== false,
           })
@@ -952,7 +971,7 @@ export default function UnoGame({
     })
 
     hostNetworkRef.current = hostPeer
-    chatTransport.setSendFunction((data) => hostPeer.broadcast(data))
+    chatTransport.setSendFunction((data) => broadcastToRoom(data))
   }
 
   // Client joins room
@@ -1494,9 +1513,9 @@ export default function UnoGame({
     if (!g) return
     resetToLobby(g)
     if (hostNetworkRef.current) {
-      hostNetworkRef.current.broadcast({
+      broadcastToRoom({
         type: 'ROOM_RESET_TO_LOBBY',
-        players: g.players,
+        players: publicRoster(g),
       })
     }
     setMpConnectionStatus('connected')
@@ -1515,7 +1534,7 @@ export default function UnoGame({
     hasShownMyCelebrationRef.current = false
     setFinishedCelebration({ isOpen: false, rank: 1, playerName: 'You', activeRemaining: 2 })
     setMpActionMessage('Host returned all players to room lobby.')
-  }, [])
+  }, [broadcastToRoom])
 
   const handleClientReturnToLobby = useCallback(() => {
     if (clientNetworkRef.current) {

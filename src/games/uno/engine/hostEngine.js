@@ -205,6 +205,21 @@ function peekNextPlayer(game) {
   return game.players[idx]
 }
 
+/**
+ * The lobby roster, safe to send to everyone. Peer ids and session ids stay on the
+ * host: a session id is what lets a refreshed tab straight back into its seat, so
+ * anyone who could read one could take that seat from a player still connected.
+ */
+export function publicRoster(game) {
+  return game.players.map((p) => ({
+    id: p.id,
+    name: p.name,
+    avatar: p.avatar,
+    isHost: Boolean(p.isHost),
+    connected: p.connected !== false,
+  }))
+}
+
 /** Roster safe to send to everyone: hands are reduced to a count. */
 export function sanitizePlayers(game) {
   return game.players.map((p) => ({

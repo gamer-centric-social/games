@@ -270,3 +270,49 @@ describe('a match already under way', () => {
     expect(result.status).toBe(ADMIT.REJECTED)
   })
 })
+
+// --- one seat per connection ------------------------------------------------
+
+describe('a connection that already holds a seat', () => {
+  it("cannot take a dropped player's seat mid-match with a second JOIN", async () => {
+    const game = makeRoom({ extras: [seat(1, { connected: false, peerId: null }), seat(2)], started: true })
+    const conn = makeConn()
+    const result = await join(game, makeNet(), conn, { name: 'P1' }, 'peer-2')
+
+    expect(result.status).toBe(ADMIT.REJECTED)
+    expect(conn.sent[0].error).toMatch(/already holds a seat/)
+    expect(game.players[1]).toMatchObject({ peerId: null, connected: false })
+  })
+
+  it('cannot take another lobby seat', async () => {
+    const game = makeRoom({ extras: [seat(1), seat(2)] })
+    const result = await join(game, makeNet(), makeConn(), { name: 'P1' }, 'peer-2')
+
+    expect(result.status).toBe(ADMIT.REJECTED)
+    expect(game.players[1]).toMatchObject({ name: 'P1', peerId: 'peer-1' })
+    expect(game.players[2]).toMatchObject({ name: 'P2', peerId: 'peer-2' })
+  })
+
+  it('may repeat its own JOIN in the lobby, changing nothing', async () => {
+    const game = makeRoom({ extras: [seat(1)] })
+    const net = makeNet()
+    const result = await join(game, net, makeConn(), { name: ' p1 ', avatar: '🐙' }, 'peer-1')
+
+    expect(result.status).toBe(ADMIT.RECLAIMED)
+    expect(result.player).toBe(game.players[1])
+    expect(game.players).toHaveLength(2)
+    expect(game.players[1].avatar).toBe('🙂')
+    expect(net.removed).toEqual([])
+  })
+
+  it('may repeat its own JOIN mid-match', async () => {
+    const game = makeRoom({ extras: [seat(1)], started: true })
+    const net = makeNet()
+    const result = await join(game, net, makeConn(), { name: 'P1' }, 'peer-1')
+
+    expect(result.status).toBe(ADMIT.RECONNECTED)
+    expect(result.player).toBe(game.players[1])
+    expect(net.checkPeerResponsive).not.toHaveBeenCalled()
+    expect(net.removed).toEqual([])
+  })
+})

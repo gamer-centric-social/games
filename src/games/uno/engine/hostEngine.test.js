@@ -7,6 +7,7 @@ import {
   currentPlayer,
   handOf,
   sanitizePlayers,
+  publicRoster,
   drawCardsFromPile,
   playCard,
   drawCard,
@@ -179,6 +180,21 @@ describe('sanitizePlayers', () => {
       { id: 1, name: 'P1', avatar: '😎', isHost: false, cardCount: 1, rank: null },
     ])
     expect(JSON.stringify(sanitized)).not.toContain('"color"')
+  })
+})
+
+describe('publicRoster', () => {
+  it('never puts a peer id or session id on the wire', () => {
+    const game = makeGame([[], []])
+    game.players[0].sessionId = 'host-secret-session'
+    Object.assign(game.players[1], { peerId: 'peer-secret', sessionId: 'guest-secret-session', isYou: true })
+
+    const roster = publicRoster(game)
+    expect(roster).toEqual([
+      { id: 0, name: 'P0', avatar: '😎', isHost: true, connected: true },
+      { id: 1, name: 'P1', avatar: '😎', isHost: false, connected: true },
+    ])
+    expect(JSON.stringify(roster)).not.toMatch(/secret/)
   })
 })
 
