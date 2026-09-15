@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createDiceTable } from './diceTable'
 import { createGame, activeSeatIds, markConnected } from '../engine/diceEngine'
-import { createSeededRng } from '../utils/rng'
+import { createSeededRng } from '../../../utils/rng'
 
 const TIMING = { revealMs: 4000, botThinkMs: 1000, disconnectTurnMs: 12000, lastPlayerMs: 15000 }
 const people = (spec) => spec.map((kind, i) => ({ name: `P${i}`, avatar: '🙂', isBot: kind === 'bot' }))

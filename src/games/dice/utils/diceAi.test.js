@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { chooseBotMove, binomialAtLeast, binomialExactly } from './diceAi'
 import { isLegalBid } from '../engine/bidRules'
-import { createSeededRng } from './rng'
+import { createSeededRng } from '../../../utils/rng'
 
 const never = () => 0.99 // no bluffing, no exact
 const always = () => 0

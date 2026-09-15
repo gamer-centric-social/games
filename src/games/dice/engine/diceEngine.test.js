@@ -19,7 +19,7 @@ import {
   rankingsOf,
 } from './diceEngine'
 import { smallestLegalBid } from './bidRules'
-import { createSeededRng } from '../utils/rng'
+import { createSeededRng } from '../../../utils/rng'
 
 // --- harness ----------------------------------------------------------------
 

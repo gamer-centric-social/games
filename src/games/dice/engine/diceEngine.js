@@ -6,7 +6,7 @@ import {
   PALIFICO_MIN_PLAYERS,
 } from '../constants/diceConstants'
 import { bidRejection, countMatches, onesAreWild, smallestLegalBid } from './bidRules'
-import { rollDie } from '../utils/rng'
+import { rollDie } from '../../../utils/rng'
 
 /**
  * Liar's Dice, host-authoritative and pure.

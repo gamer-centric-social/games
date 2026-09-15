@@ -10,7 +10,7 @@ import {
   diceInPlay,
 } from '../engine/diceEngine'
 import { chooseBotMove } from '../utils/diceAi'
-import { cryptoRng } from '../utils/rng'
+import { cryptoRng } from '../../../utils/rng'
 
 /**
  * The table: the one thing that drives the engine, for solo and for the online host.

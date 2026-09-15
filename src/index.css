@@ -12,7 +12,7 @@
      - every lift carries a warm top-edge highlight, because the light is above.
 
    The shell is almost colourless on purpose. The only saturated colour in the
-   app comes from the three games' own inks, so colour always means something.
+   app comes from the five games' own inks, so colour always means something.
 
    Tailwind v4 is configured CSS-first — there is no tailwind.config.js and one
    must not be created.
@@ -32,11 +32,12 @@
   --color-ink-muted: #a89a8a;
   --color-ink-faint: #7a6e61;
 
-  /* -- the four game inks ------------------------------------------------- */
+  /* -- the five game inks ------------------------------------------------- */
   --color-imposter:  #e23a5c;
   --color-uno:       #f0a926;
   --color-tank:      #2dc4c9;
   --color-dice:      #9d7bf0;
+  --color-bounce:    #c3e84f;  /* the one hue nothing else here occupies */
 
   /* -- semantic, tuned to survive on a warm ground ------------------------ */
   --color-ok:        #4fb477;  /* ready, connected, shield */
@@ -62,6 +63,21 @@
   --color-card-blue:   #3b7fd4;
   --color-card-face:   #fbf7f1;  /* the oval and the frame -- warm, so a card
                                     rests on the table instead of glowing on it */
+
+  /* -- Bounce's four ball colours ------------------------------------------
+     The second game whose colours are material rather than ink, and for the
+     same reason UNO's are: they ARE the rules. You cannot climb without telling
+     them apart, and misreading one costs you the race rather than merely
+     confusing you -- which is why every colour also carries a shape, and the
+     live one is named in words beside the height. Playable in greyscale.
+     Spaced far apart in hue from each other first, and then pushed clear of
+     --color-tank and --color-uno so a Bounce screenshot never reads as another
+     game's chrome. COLOR_CONFIG in bounceConstants.js mirrors these as hexes,
+     which is what the canvas draws with. */
+  --color-bounce-blue: #5b6cff;
+  --color-bounce-pink: #ff5ea8;
+  --color-bounce-turq: #22d3a5;
+  --color-bounce-gold: #ffe14d;
 
   /* -- type --------------------------------------------------------------- */
   --font-display: "Bricolage Grotesque", "Hanken Grotesk", system-ui, sans-serif;
