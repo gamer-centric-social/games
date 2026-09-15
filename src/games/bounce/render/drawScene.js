@@ -18,7 +18,7 @@ export function drawScene(ctx, { run, course, pixelWidth, pixelHeight }) {
   ctx.save()
   ctx.setTransform(view.scale, 0, 0, view.scale, 0, 0)
   drawShaft(ctx, { view, course })
-  drawObstacles(ctx, { view, course, t: run.t })
+  drawObstacles(ctx, { view, course, t: run.t, run })
   drawBall(ctx, { view, run })
   ctx.restore()
 }

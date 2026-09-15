@@ -51,10 +51,12 @@ function play(table, { seconds, fps = 60, tapEveryMs = 0, startAt = 1000 }) {
 // into the wrong arc it holds off and lets the ring turn. That it always gets
 // home is itself the point, and the check that the course is never a dead end.
 
-const GATE_TYPES = new Set(['ring', 'slider'])
+const GATE_TYPES = new Set(['ring', 'pendulum', 'ratchet', 'slider', 'shutter'])
 /** Close enough that a single tap could carry the ball into the gate. */
 const LOOKAHEAD_RANGE = 420
 const LOOKAHEAD_STEPS = 150
+/** A chamber is decided several taps ahead, so its probe has to look further. */
+const CHAMBER_PROBE_STEPS = 400
 
 function nextGate(run, course) {
   for (let i = run.cursor; i < course.crossings.length; i++) {
@@ -75,8 +77,42 @@ function wouldFault(run, course) {
   return false
 }
 
+/**
+ * Climb flat out from here and report what the chamber's ceiling did.
+ *
+ * A ring is a one-tap decision, so the ordinary lookahead settles it. A chamber
+ * is not: it takes three taps to cross, and each of them looks harmless on its
+ * own while the three together commit you. So the probe runs the whole ascent
+ * under the same policy the autopilot will actually execute -- tap whenever you
+ * are not already rising -- and asks how it ends.
+ */
+function chamberOutcome(run, course) {
+  let next = run
+  for (let i = 0; i < CHAMBER_PROBE_STEPS && next.status === 'climbing'; i++) {
+    const out = stepRun(next, course, { dt: FIXED_DT, tapped: next.vy <= 0 })
+    for (const event of out.events) {
+      if (event.type === EVENTS.WRONG_COLOR) return 'fault'
+      if (event.type === EVENTS.GATE_CLEARED && event.kind === 'chamber-exit') return 'clear'
+    }
+    next = out.run
+  }
+  return 'unknown'
+}
+
 function shouldTap(run, course) {
   if (!run || run.status !== 'climbing') return false
+
+  if (run.inside !== null) {
+    // Re-read the room every frame rather than committing to a plan made on the
+    // floor. The table decides once a frame and queues the tap, so the real
+    // ascent drifts off any plan drawn a substep at a time -- and a plan that is
+    // only checked once turns that drift into a ceiling you did not choose.
+    // Aborting is free: stop tapping and you settle back onto the floor.
+    if (chamberOutcome(run, course) !== 'clear') return false
+    // Act on the probe's own first move, so what is executed is what was read.
+    return run.vy <= 0
+  }
+
   const gate = nextGate(run, course)
   if (!gate || gate.y - run.y > LOOKAHEAD_RANGE) return true
   return !wouldFault(run, course)
@@ -289,6 +325,30 @@ describe('finishing', () => {
     expect(events.filter((e) => e.type === EVENTS.CHECKPOINT).length).toBeGreaterThan(1)
     expect(events.filter((e) => e.type === EVENTS.GATE_CLEARED).length).toBeGreaterThan(10)
     expect(table.run.finishT).toBeGreaterThan(0)
+  })
+
+  it('waits on the chamber floor and leaves clean, rather than battering the ceiling', () => {
+    // A climber that simply hammered upward would also reach the line eventually,
+    // by faulting until the dice came good -- and then this file would prove much
+    // less than it claims. Escaping every chamber it enters, first time, is what
+    // makes it evidence that the room is solvable by playing it.
+    for (const seed of [1, 7, 2024, 909090]) {
+      const { table, events } = harness()
+      table.load(seed)
+      climb(table)
+
+      const entered = events.filter((e) => e.type === EVENTS.ENTERED_CHAMBER).length
+      const escaped = events.filter(
+        (e) => e.type === EVENTS.GATE_CLEARED && e.kind === 'chamber-exit'
+      ).length
+      const ceilingFaults = events.filter(
+        (e) => e.type === EVENTS.WRONG_COLOR && e.kind === 'chamber-exit'
+      ).length
+
+      expect(entered, `seed ${seed}`).toBeGreaterThan(0)
+      expect(escaped, `seed ${seed}`).toBe(entered)
+      expect(ceilingFaults, `seed ${seed}`).toBe(0)
+    }
   })
 
   it('finishes every seed it is given', () => {

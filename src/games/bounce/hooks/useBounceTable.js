@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createBounceTable } from '../services/bounceTable'
+import { roomAt } from '../engine/courseGen'
+import { colorAtCrossing } from '../engine/gates'
 import { playBounceEvents } from '../utils/bounceSounds'
 
 /**
@@ -16,34 +18,54 @@ import { playBounceEvents } from '../utils/bounceSounds'
  */
 const HUD_INTERVAL_MS = 100
 
-const hudFrom = (run) => ({
-  color: run.color,
-  checkpointIndex: run.checkpointIndex,
-  status: run.status,
-  y: run.y,
-  maxY: run.maxY,
-  t: run.t,
-  cleared: run.cleared,
-  faults: run.faults,
-  finishT: run.finishT,
-})
+const hudFrom = (run, course) => {
+  const box = run.inside !== null && course ? course.elements[run.inside] : null
+  return {
+    color: run.color,
+    checkpointIndex: run.checkpointIndex,
+    status: run.status,
+    y: run.y,
+    maxY: run.maxY,
+    t: run.t,
+    cleared: run.cleared,
+    faults: run.faults,
+    finishT: run.finishT,
+    /** Which room you are in, so the climb can be talked about. */
+    room: course ? roomAt(course, run.y) : null,
+    inside: box !== null,
+    /**
+     * The colour standing between you and the way out of a chamber. It is on the
+     * canvas too, but this is the only copy a screen reader will ever get -- and
+     * the chamber is the one place on the course where a misread costs a room
+     * rather than a moment.
+     */
+    ceiling: box ? colorAtCrossing(box, run.t) : null,
+  }
+}
 
 /** Pushes to React only on a change worth re-rendering for. */
 function createHudPump(setHud) {
   let signature = ''
   let lastPush = 0
-  return (run) => {
+  return (run, course) => {
     if (!run) {
       signature = ''
       setHud(null)
       return
     }
     const now = Date.now()
-    const next = `${run.color}|${run.checkpointIndex}|${run.status}`
+    const snapshot = hudFrom(run, course)
+    const next = [
+      snapshot.color,
+      snapshot.checkpointIndex,
+      snapshot.status,
+      snapshot.room,
+      snapshot.ceiling,
+    ].join('|')
     if (next === signature && now - lastPush < HUD_INTERVAL_MS) return
     signature = next
     lastPush = now
-    setHud(hudFrom(run))
+    setHud(snapshot)
   }
 }
 

@@ -13,7 +13,7 @@ import {
   startRace,
 } from './raceState'
 import {
-  CHECKPOINT_SPAN,
+  MIN_CHECKPOINT_SPAN,
   COURSE_HEIGHT,
   MAX_CLIMB_RATE,
   MIN_FINISH_MS,
@@ -130,10 +130,10 @@ describe('applyProgress', () => {
 
   it('never lets a checkpoint go backwards', () => {
     const r = started()
-    applyProgress(r, 1, { y: CHECKPOINT_SPAN * 2 }, T0 + msFor(CHECKPOINT_SPAN * 2))
-    applyProgress(r, 1, { y: CHECKPOINT_SPAN * 2, checkpointIndex: 2 }, T0 + msFor(CHECKPOINT_SPAN * 2) + 200)
+    applyProgress(r, 1, { y: MIN_CHECKPOINT_SPAN * 2 }, T0 + msFor(MIN_CHECKPOINT_SPAN * 2))
+    applyProgress(r, 1, { y: MIN_CHECKPOINT_SPAN * 2, checkpointIndex: 2 }, T0 + msFor(MIN_CHECKPOINT_SPAN * 2) + 200)
     expect(r.players[1].checkpointIndex).toBe(2)
-    applyProgress(r, 1, { y: 10, checkpointIndex: 0 }, T0 + msFor(CHECKPOINT_SPAN * 2) + 400)
+    applyProgress(r, 1, { y: 10, checkpointIndex: 0 }, T0 + msFor(MIN_CHECKPOINT_SPAN * 2) + 400)
     expect(r.players[1].checkpointIndex).toBe(2)
   })
 

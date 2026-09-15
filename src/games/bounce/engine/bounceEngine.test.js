@@ -1,20 +1,35 @@
 import { describe, it, expect } from 'vitest'
-import { EVENTS, colorAtCrossing, createRun, runProgress, stepRun } from './bounceEngine'
+import { EVENTS, createRun, runProgress, stepRun } from './bounceEngine'
 import { buildCourse } from './courseGen'
-import { FIXED_DT, GRAVITY, TAP_IMPULSE, TERMINAL_FALL } from '../constants/bounceConstants'
+import {
+  BALL_RADIUS,
+  FIXED_DT,
+  GRAVITY,
+  RING_STROKE,
+  TAP_APEX,
+  TAP_IMPULSE,
+  TERMINAL_FALL,
+} from '../constants/bounceConstants'
 
 /** A course fabricated by hand, shaped exactly like buildCourse's output. */
 function makeCourse({ elements = [], checkpointYs = [0], height = 6000, startColor = 'blue' } = {}) {
   const checkpoints = checkpointYs.map((y, index) => ({ index, y, color: startColor, crossingIndex: 0 }))
   const crossings = [
-    ...elements.map((el, elementIndex) => ({ y: el.crossY ?? el.y, type: el.kind, elementIndex })),
+    ...elements.flatMap((el, elementIndex) =>
+      el.kind === 'chamber'
+        ? [
+            { y: el.crossY, type: 'chamber-entry', elementIndex },
+            { y: el.exitY, type: 'chamber-exit', elementIndex },
+          ]
+        : [{ y: el.crossY ?? el.y, type: el.kind, elementIndex }]
+    ),
     ...checkpoints.map((cp) => ({ y: cp.y, type: 'checkpoint', elementIndex: cp.index })),
     { y: height, type: 'finish', elementIndex: -1 },
   ].sort((a, b) => a.y - b.y || (a.type === 'checkpoint' ? -1 : 1))
   for (const cp of checkpoints) {
     cp.crossingIndex = crossings.findIndex((c) => c.type === 'checkpoint' && c.elementIndex === cp.index) + 1
   }
-  return { seed: 0, height, startColor, elements, checkpoints, crossings }
+  return { seed: 0, height, startColor, elements, checkpoints, crossings, segments: [] }
 }
 
 /** A still ring is entered on its fourth arc: world angle -pi/2 lands in quadrant 3. */
@@ -30,6 +45,30 @@ const ring = (y, colors, extra = {}) => ({
 })
 
 const swatch = (y, color) => ({ kind: 'swatch', y, crossY: y, color })
+
+/**
+ * A still chamber. Its ceiling sits at world angle +pi/2, which on a phase of
+ * zero lands on the *second* arc -- the opposite end of the circle from the one a
+ * ring is entered through.
+ */
+const CHAMBER_RADIUS_FIXTURE = 240
+function chamber(bottomY, colors, extra = {}) {
+  const radius = CHAMBER_RADIUS_FIXTURE
+  const wallInner = radius - RING_STROKE / 2
+  const centre = bottomY + radius
+  return {
+    kind: 'chamber',
+    y: centre,
+    radius,
+    crossY: centre - wallInner + BALL_RADIUS,
+    exitY: centre + wallInner - BALL_RADIUS,
+    omega: 0,
+    phase: 0,
+    colors,
+    core: null,
+    ...extra,
+  }
+}
 
 const step = (run, course, opts) => stepRun(run, course, { dt: FIXED_DT, ...opts })
 
@@ -48,43 +87,14 @@ function drive(run, course, { steps, tapEvery = 1, dt = FIXED_DT, stopOn = null 
 }
 
 const typesOf = (events) => events.map((e) => e.type)
+const countOf = (events, type) => events.filter((e) => e.type === type).length
 
 describe('createRun', () => {
-  it('starts on the floor holding the course colour', () => {
+  it('starts on the floor holding the course colour, inside nothing', () => {
     const course = makeCourse()
     const run = createRun(course)
-    expect(run).toMatchObject({ y: 0, vy: 0, t: 0, color: 'blue', checkpointIndex: 0, status: 'climbing' })
+    expect(run).toMatchObject({ y: 0, vy: 0, t: 0, color: 'blue', checkpointIndex: 0, status: 'climbing', inside: null })
     expect(run.cursor).toBe(course.checkpoints[0].crossingIndex)
-  })
-})
-
-describe('colorAtCrossing', () => {
-  it('reads a still ring at the bottom of its circle', () => {
-    expect(colorAtCrossing(ring(0, ['blue', 'pink', 'turq', 'gold']), 0)).toBe('gold')
-    expect(colorAtCrossing(ring(0, ['gold', 'blue', 'pink', 'turq']), 0)).toBe('turq')
-  })
-
-  it('turns the arcs under the crossing point over time', () => {
-    const el = ring(0, ['blue', 'pink', 'turq', 'gold'], { omega: 1 })
-    const seen = new Set()
-    for (let t = 0; t < 7; t += 0.05) seen.add(colorAtCrossing(el, t))
-    expect(seen).toEqual(new Set(['blue', 'pink', 'turq', 'gold']))
-  })
-
-  it('sweeps a slider past the centre line', () => {
-    const el = { kind: 'slider', y: 0, crossY: 0, speed: 200, offset: 0, colors: ['blue', 'pink', 'turq', 'gold'] }
-    const seen = new Set()
-    for (let t = 0; t < 6; t += 0.05) seen.add(colorAtCrossing(el, t))
-    expect(seen).toEqual(new Set(['blue', 'pink', 'turq', 'gold']))
-  })
-
-  it('is a pure function of the element and the time', () => {
-    const el = ring(0, ['blue', 'pink', 'turq', 'gold'], { omega: 1.4, phase: 0.3 })
-    expect(colorAtCrossing(el, 2.5)).toBe(colorAtCrossing(el, 2.5))
-  })
-
-  it('has no colour for a swatch', () => {
-    expect(colorAtCrossing(swatch(100, 'pink'), 0)).toBeNull()
   })
 })
 
@@ -105,6 +115,24 @@ describe('stepRun physics', () => {
     const first = run.vy
     run = step(run, course).run
     expect(run.vy).toBeCloseTo(first - GRAVITY * FIXED_DT, 6)
+  })
+
+  it('lifts a shade under one tap apex from rest, never over it', () => {
+    // TAP_APEX is the continuous answer; stepping at a fixed dt lands a little
+    // short of it, by about half a step of travel. The direction matters: every
+    // chamber is sized against two tap apexes, so a real tap falling *short* of
+    // the figure the constant assumes is what keeps "you cannot reach the ceiling
+    // by accident" true with room to spare. If this ever overshot, that bound
+    // would be the thing that quietly broke.
+    const course = makeCourse()
+    let run = createRun(course)
+    let highest = 0
+    for (let i = 0; i < 200; i++) {
+      run = step(run, course, { tapped: i === 0 }).run
+      highest = Math.max(highest, run.y)
+    }
+    expect(highest).toBeLessThanOrEqual(TAP_APEX)
+    expect(highest).toBeGreaterThan(TAP_APEX - TAP_IMPULSE * FIXED_DT)
   })
 
   it('clamps the fall at terminal velocity', () => {
@@ -157,7 +185,7 @@ describe('gates', () => {
       stopOn: EVENTS.WRONG_COLOR,
     })
     const fault = events.find((e) => e.type === EVENTS.WRONG_COLOR)
-    expect(fault).toMatchObject({ needed: 'gold', had: 'blue' })
+    expect(fault).toMatchObject({ needed: 'gold', had: 'blue', kind: 'ring' })
     expect(run.checkpointIndex).toBe(1)
     expect(run.y).toBe(3000)
     expect(run.vy).toBe(0)
@@ -177,6 +205,7 @@ describe('gates', () => {
     })
     expect(run.color).toBe('blue')
     expect(run.cursor).toBe(course.checkpoints[1].crossingIndex)
+    expect(run.inside).toBeNull()
   })
 
   it('changes colour at a swatch, and only when the colour is new', () => {
@@ -184,6 +213,7 @@ describe('gates', () => {
     const { run, events } = drive(createRun(course), course, { steps: 600, tapEvery: 6 })
     expect(run.color).toBe('pink')
     expect(events.filter((e) => e.type === EVENTS.COLOR_CHANGED)).toHaveLength(1)
+    expect(events.find((e) => e.type === EVENTS.COLOR_CHANGED).from).toBe('swatch')
   })
 
   it('re-arms a gate after falling back below it', () => {
@@ -194,6 +224,133 @@ describe('gates', () => {
     out = drive(out.run, course, { steps: 300, tapEvery: 0 })
     expect(out.run.y).toBe(0)
     expect(out.run.cursor).toBeLessThan(above)
+  })
+})
+
+describe('the chamber', () => {
+  const COLOURS = ['blue', 'pink', 'turq', 'gold']
+  // A still chamber shows its second arc at the ceiling.
+  const box = (extra) => chamber(600, COLOURS, extra)
+
+  it('is entered without a colour check: the lip is not a gate', () => {
+    // Holding blue, against a ceiling showing pink. Getting in is still free --
+    // the chamber has exactly one fault point, and it is on the way out.
+    const course = makeCourse({ elements: [box()] })
+    const { run, events } = drive(createRun(course), course, {
+      steps: 400,
+      tapEvery: 6,
+      stopOn: EVENTS.ENTERED_CHAMBER,
+    })
+    expect(typesOf(events)).toContain(EVENTS.ENTERED_CHAMBER)
+    expect(typesOf(events)).not.toContain(EVENTS.WRONG_COLOR)
+    expect(run.inside).toBe(0)
+  })
+
+  it('shuts the lip behind you: the floor is solid and you cannot drop out', () => {
+    // This is what makes the ceiling fault fair. You can stand here and read the
+    // turn for as long as you like, so committing is always a decision.
+    const course = makeCourse({ elements: [box()] })
+    const entered = drive(createRun(course), course, { steps: 400, tapEvery: 6, stopOn: EVENTS.ENTERED_CHAMBER })
+    const settled = drive(entered.run, course, { steps: 600, tapEvery: 0 })
+
+    expect(settled.run.inside).toBe(0)
+    expect(settled.run.y).toBeCloseTo(course.elements[0].crossY, 6)
+    expect(typesOf(settled.events)).not.toContain(EVENTS.FELL)
+    expect(settled.run.y).toBeGreaterThan(course.checkpoints[0].y)
+  })
+
+  it('reports entering once, however long you bounce around inside', () => {
+    const course = makeCourse({ elements: [box()] })
+    const entered = drive(createRun(course), course, { steps: 400, tapEvery: 6, stopOn: EVENTS.ENTERED_CHAMBER })
+    // One tap per full up-and-down, so the ball hops off the floor and settles
+    // back on it over and over without ever climbing toward the ceiling. Each
+    // landing must not read as arriving through the lip again.
+    const milling = drive(entered.run, course, { steps: 900, tapEvery: 110 })
+    expect(countOf(milling.events, EVENTS.ENTERED_CHAMBER)).toBe(0)
+    expect(countOf(milling.events, EVENTS.WRONG_COLOR)).toBe(0)
+    expect(milling.run.inside).toBe(0)
+  })
+
+  it('cannot be escaped on one tap from the floor, whatever the ceiling shows', () => {
+    // The fairness invariant, from the inside: a single tap never commits you.
+    const course = makeCourse({ elements: [box()] })
+    const entered = drive(createRun(course), course, { steps: 400, tapEvery: 6, stopOn: EVENTS.ENTERED_CHAMBER })
+    const settled = drive(entered.run, course, { steps: 400, tapEvery: 0 })
+
+    const once = drive(settled.run, course, { steps: 200, tapEvery: 1000 })
+    expect(typesOf(once.events)).not.toContain(EVENTS.WRONG_COLOR)
+    expect(typesOf(once.events)).not.toContain(EVENTS.GATE_CLEARED)
+    expect(once.run.inside).toBe(0)
+  })
+
+  it('lets you out through the ceiling on the colour it is showing', () => {
+    const course = makeCourse({ elements: [box()] }, { startColor: 'blue' })
+    // Start on the ceiling colour so the escape is clean.
+    const run = { ...createRun(course), color: 'pink' }
+    const { run: out, events } = drive(run, course, { steps: 900, tapEvery: 6 })
+    expect(countOf(events, EVENTS.GATE_CLEARED)).toBe(1)
+    expect(events.find((e) => e.type === EVENTS.GATE_CLEARED).kind).toBe('chamber-exit')
+    expect(out.inside).toBeNull()
+    expect(out.y).toBeGreaterThan(course.elements[0].exitY)
+  })
+
+  it('faults you back to the checkpoint on the wrong colour, once and not twice', () => {
+    const course = makeCourse({ elements: [box()], checkpointYs: [0] })
+    const { run, events } = drive(createRun(course), course, {
+      steps: 900,
+      tapEvery: 6,
+      stopOn: EVENTS.WRONG_COLOR,
+    })
+    const fault = events.find((e) => e.type === EVENTS.WRONG_COLOR)
+    expect(fault).toMatchObject({ needed: 'pink', had: 'blue', kind: 'chamber-exit' })
+    expect(countOf(events, EVENTS.WRONG_COLOR)).toBe(1)
+    expect(run.y).toBe(0)
+    expect(run.inside).toBeNull()
+  })
+
+  it('catches you again if you drop back in through the ceiling you left by', () => {
+    // A chamber is a room, not a gate, and it is solid in both directions. Were
+    // it not, a floor you were resting on a moment ago would have become air the
+    // instant you left by the top -- and a ball falling from the room above would
+    // drop clean through it to the checkpoint, past a solid wall.
+    const course = makeCourse({ elements: [box()], checkpointYs: [0] })
+    const built = course.elements[0]
+    // Start just above the chamber, on its own colour, falling.
+    const above = { ...createRun(course), color: 'pink', y: built.exitY + 120, vy: -200, cursor: 3 }
+    const { run, events } = drive(above, course, { steps: 400, tapEvery: 0 })
+
+    expect(run.inside).toBe(0)
+    expect(run.y).toBeCloseTo(built.crossY, 6)
+    expect(events.find((e) => e.type === EVENTS.ENTERED_CHAMBER)).toMatchObject({ fell: true })
+    expect(typesOf(events)).not.toContain(EVENTS.FELL)
+  })
+
+  it('paints the ball whatever the core is showing, for as long as it is touched', () => {
+    const floorY = chamber(600, COLOURS).crossY
+    const core = { y: floorY, period: 0.4, phase: 0, colors: COLOURS }
+    const course = makeCourse({ elements: [chamber(600, COLOURS, { core })] })
+
+    const entered = drive(createRun(course), course, { steps: 400, tapEvery: 6, stopOn: EVENTS.ENTERED_CHAMBER })
+    // Sit on the floor, in the core, and let it cycle underneath us.
+    const held = drive(entered.run, course, { steps: 400, tapEvery: 0 })
+    const painted = held.events.filter((e) => e.type === EVENTS.COLOR_CHANGED)
+
+    expect(painted.length).toBeGreaterThan(1)
+    expect(painted.every((e) => e.from === 'core')).toBe(true)
+    expect(new Set(painted.map((e) => e.color)).size).toBeGreaterThan(1)
+  })
+
+  it('leaves the colour alone once the ball is clear of the core', () => {
+    // The holding zone between the core and the ceiling is where the skill is:
+    // take a colour, rise out of the core, and keep it while you read the turn.
+    const built = chamber(600, COLOURS)
+    const core = { y: built.crossY, period: 0.4, phase: 0, colors: COLOURS }
+    const course = makeCourse({ elements: [chamber(600, COLOURS, { core })] })
+
+    const entered = drive(createRun(course), course, { steps: 400, tapEvery: 6, stopOn: EVENTS.ENTERED_CHAMBER })
+    const above = { ...entered.run, y: built.exitY - 30, vy: 0 }
+    const { events } = drive(above, course, { steps: 30, tapEvery: 0 })
+    expect(typesOf(events)).not.toContain(EVENTS.COLOR_CHANGED)
   })
 })
 
@@ -255,11 +412,34 @@ describe('the tunnelling guard', () => {
     expect(events.filter((e) => e.type === EVENTS.FINISHED)).toHaveLength(1)
   })
 
+  it('never rushes a ball straight through a chamber', () => {
+    // A chamber is the one thing you can be inside, so the failure mode here is
+    // worse than a skipped ring: you would sail out of the top of a room you were
+    // supposed to be solving. Shoved upward at terminal velocity, the lip must
+    // still catch and the ceiling must still be tested.
+    const colors = ['blue', 'pink', 'turq', 'gold']
+    const course = makeCourse({ elements: [chamber(600, colors)], checkpointYs: [0], height: 4000 })
+
+    let run = createRun(course)
+    const events = []
+    for (let i = 0; i < 300 && run.status === 'climbing'; i++) {
+      const out = stepRun({ ...run, vy: TERMINAL_FALL }, course, { dt: FIXED_DT })
+      run = out.run
+      events.push(...out.events)
+      if (out.events.some((e) => e.type === EVENTS.WRONG_COLOR)) break
+    }
+
+    expect(countOf(events, EVENTS.ENTERED_CHAMBER)).toBe(1)
+    expect(countOf(events, EVENTS.WRONG_COLOR)).toBe(1)
+    expect(events.find((e) => e.type === EVENTS.WRONG_COLOR).kind).toBe('chamber-exit')
+  })
+
   it('evaluates every gate on a real course, none skipped', () => {
     // Same sweep against generated geometry: shove the ball up at terminal velocity
     // and count gates. A fault rolls back, so track the high-water mark instead.
     const course = buildCourse(2024)
-    const gates = course.crossings.filter((c) => c.type === 'ring' || c.type === 'slider')
+    const gated = new Set(['ring', 'pendulum', 'ratchet', 'slider', 'shutter', 'chamber-exit'])
+    const gates = course.crossings.filter((c) => gated.has(c.type))
     expect(gates.length).toBeGreaterThan(10)
 
     let run = createRun(course)
@@ -270,8 +450,7 @@ describe('the tunnelling guard', () => {
       const out = stepRun(from, course, { dt: FIXED_DT })
       seen += out.events.filter((e) => e.type === EVENTS.GATE_CLEARED || e.type === EVENTS.WRONG_COLOR).length
       // A fault drops us to the checkpoint; step straight back up so the sweep goes on.
-      run = out.run.y < from.y ? { ...out.run, cursor: out.run.cursor } : out.run
-      if (out.run.y < from.y) run = { ...run, y: from.y, cursor: from.cursor + 1 }
+      run = out.run.y < from.y ? { ...out.run, y: from.y, cursor: from.cursor + 1, inside: from.inside } : out.run
     }
     expect(run.status).toBe('finished')
     expect(seen).toBe(gates.length)

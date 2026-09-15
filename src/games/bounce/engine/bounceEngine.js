@@ -1,9 +1,10 @@
 import {
+  BALL_RADIUS,
   GRAVITY,
-  SLIDER_SEGMENT,
   TAP_IMPULSE,
   TERMINAL_FALL,
 } from '../constants/bounceConstants'
+import { colorAtCrossing, coreColorAt, touchingCore } from './gates'
 
 /**
  * One player's climb. Pure: no React, no clock, no randomness -- the course is
@@ -21,31 +22,7 @@ export const EVENTS = {
   WRONG_COLOR: 'WRONG_COLOR',
   FELL: 'FELL',
   FINISHED: 'FINISHED',
-}
-
-const TAU = Math.PI * 2
-const QUADRANT = Math.PI / 2
-const SLIDER_WIDTH = SLIDER_SEGMENT * 4
-
-const wrap = (value, span) => ((value % span) + span) % span
-
-/**
- * Which colour is covering the crossing point at time `t`.
- *
- * A ring is entered at the bottom of its circle, world angle -pi/2; its four arcs
- * turn under that point. A slider is a band of four colours sweeping sideways past
- * the shaft's centre line at x = 0.
- */
-export function colorAtCrossing(element, t) {
-  if (element.kind === 'ring') {
-    const local = wrap(-Math.PI / 2 - (element.phase + element.omega * t), TAU)
-    return element.colors[Math.floor(local / QUADRANT) % 4]
-  }
-  if (element.kind === 'slider') {
-    const local = wrap(-(element.offset + element.speed * t), SLIDER_WIDTH)
-    return element.colors[Math.floor(local / SLIDER_SEGMENT) % 4]
-  }
-  return null
+  ENTERED_CHAMBER: 'ENTERED_CHAMBER',
 }
 
 export function createRun(course) {
@@ -56,6 +33,8 @@ export function createRun(course) {
     color: course.startColor,
     checkpointIndex: 0,
     cursor: course.checkpoints[0].crossingIndex,
+    /** Which chamber is holding you, or null out in the open shaft. */
+    inside: null,
     maxY: 0,
     cleared: 0,
     faults: 0,
@@ -74,6 +53,15 @@ export const runProgress = (run, course) => Math.min(1, Math.max(0, run.maxY / c
  * "is the ball inside the arc right now" would tunnel straight through. Instead we
  * walk every crossing between the old and new height, and evaluate each at the
  * moment the ball actually reached it.
+ *
+ * A chamber is the one thing on the course you are *inside* rather than *past*,
+ * and it bends that rule in a way worth being precise about. Its lip is crossed
+ * once and is not a gate at all. Its ceiling is a gate, and is evaluated on every
+ * upward approach -- never skipped, never twice in one approach -- because you
+ * may rise at it, think better of it, and drop back to the floor as often as you
+ * like. Its core is neither: that is an overlap test, which is only safe because
+ * the core is thick. A gate outline is not, which is why gates stay plane
+ * crossings and this comment exists.
  */
 export function stepRun(run, course, { dt, tapped = false } = {}) {
   if (run.status !== 'climbing') return { run, events: [] }
@@ -81,7 +69,7 @@ export function stepRun(run, course, { dt, tapped = false } = {}) {
   const events = []
   const { crossings, elements, checkpoints } = course
 
-  let { y, vy, t, color, checkpointIndex, cursor, maxY, cleared, faults } = run
+  let { y, vy, t, color, checkpointIndex, cursor, inside, maxY, cleared, faults } = run
   let status = 'climbing'
   let finishT = run.finishT
 
@@ -103,6 +91,7 @@ export function stepRun(run, course, { dt, tapped = false } = {}) {
     vy = 0
     color = cp.color
     cursor = cp.crossingIndex
+    inside = null
   }
 
   if (yNext > y0) {
@@ -132,29 +121,66 @@ export function stepRun(run, course, { dt, tapped = false } = {}) {
       if (crossing.type === 'swatch') {
         if (element.color !== color) {
           color = element.color
-          events.push({ type: EVENTS.COLOR_CHANGED, color })
+          events.push({ type: EVENTS.COLOR_CHANGED, color, from: 'swatch' })
         }
+        continue
+      }
+
+      if (crossing.type === 'chamber-entry') {
+        // The lip is not a gate. You rise through it and it shuts behind you --
+        // which is what makes the chamber floor somewhere you can stand and read
+        // the ceiling, and so what makes the ceiling a decision rather than an
+        // accident.
+        inside = crossing.elementIndex
+        events.push({ type: EVENTS.ENTERED_CHAMBER, index: crossing.elementIndex })
         continue
       }
 
       const needed = colorAtCrossing(element, at)
       if (needed === color) {
         cleared++
+        if (crossing.type === 'chamber-exit') inside = null
         events.push({ type: EVENTS.GATE_CLEARED, kind: crossing.type })
         continue
       }
 
       faults++
-      events.push({ type: EVENTS.WRONG_COLOR, needed, had: color, index: checkpointIndex })
+      events.push({
+        type: EVENTS.WRONG_COLOR,
+        needed,
+        had: color,
+        index: checkpointIndex,
+        kind: crossing.type,
+      })
       resetToCheckpoint()
       break
     }
   } else if (yNext < y0) {
-    // Falling passes back through gates freely; only the climb is gated.
-    while (cursor > 0 && crossings[cursor - 1].y > yNext) cursor--
+    // Falling passes back through gates freely; only the climb is gated. But a
+    // chamber is a room, not a gate, and it is solid in both directions: drop
+    // back through the ceiling you just left and you are in it again, standing on
+    // the same floor. Anything else would mean a floor you were resting on a
+    // moment ago had quietly become air.
+    while (cursor > 0 && crossings[cursor - 1].y > yNext) {
+      const back = crossings[cursor - 1]
+      if (back.type === 'chamber-exit' && inside === null) {
+        inside = back.elementIndex
+        events.push({ type: EVENTS.ENTERED_CHAMBER, index: inside, fell: true })
+      }
+      // The floor catches you before you could ever un-cross the lip.
+      if (back.type === 'chamber-entry' && inside === back.elementIndex) break
+      cursor--
+    }
+    if (inside !== null) {
+      const floorY = elements[inside].crossY
+      if (yNext < floorY) {
+        yNext = floorY
+        if (vy < 0) vy = 0
+      }
+    }
   }
 
-  if (status === 'climbing') {
+  if (status === 'climbing' && inside === null) {
     const floor = checkpoints[checkpointIndex].y
     if (yNext < floor) {
       // Resting on the checkpoint is not falling off it: only report a real drop,
@@ -169,6 +195,19 @@ export function stepRun(run, course, { dt, tapped = false } = {}) {
     }
   }
 
+  // The core paints you for as long as you are touching it, so hovering in it and
+  // waiting for the colour you want is the intended move rather than an exploit.
+  if (status === 'climbing' && inside !== null) {
+    const { core } = elements[inside]
+    if (core && touchingCore(core, yNext, BALL_RADIUS)) {
+      const painted = coreColorAt(core, t)
+      if (painted !== color) {
+        color = painted
+        events.push({ type: EVENTS.COLOR_CHANGED, color, from: 'core' })
+      }
+    }
+  }
+
   return {
     run: {
       y: yNext,
@@ -177,6 +216,7 @@ export function stepRun(run, course, { dt, tapped = false } = {}) {
       color,
       checkpointIndex,
       cursor,
+      inside,
       maxY: Math.max(maxY, yNext),
       cleared,
       faults,

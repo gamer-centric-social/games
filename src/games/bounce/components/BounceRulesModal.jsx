@@ -65,6 +65,23 @@ export default function BounceRulesModal({ isOpen, onClose }) {
         </p>
       </section>
 
+      <section className="space-y-2">
+        <h3 className="text-sm font-bold text-ink">The chamber</h3>
+        <p className="text-ink-muted leading-relaxed">
+          Some rooms are one big ring you climb <em>into</em>. The lip closes under you, so there is
+          no way back down and no rush: stand on the floor as long as you like and watch the ceiling
+          turn. You leave only when it is showing the colour you hold.
+        </p>
+        <p className="text-ink-muted leading-relaxed">
+          The glowing disc inside is the core. Touch it and your ball takes whatever colour it is
+          showing, so pick your colour there, rise out of it, and go when the ceiling comes round.
+          It takes three taps to reach the top from the floor — you will never hit it by accident.
+        </p>
+        <p className="text-ink-muted leading-relaxed">
+          Hit the ceiling on the wrong colour and it costs you the room.
+        </p>
+      </section>
+
       <section className="space-y-1">
         <h3 className="text-sm font-bold text-ink">Getting it wrong</h3>
         <p className="text-ink-muted leading-relaxed">
@@ -78,7 +95,10 @@ export default function BounceRulesModal({ isOpen, onClose }) {
         <h3 className="text-sm font-bold text-ink">Reading the shaft</h3>
         <p className="text-ink-muted leading-relaxed">
           The shaft gets lighter the higher you go, so how lit it is tells you how far you have come.
-          The bar above your ball shows everyone racing; the rings turn faster the nearer the top.
+          A chamber is the exception — the light does not reach inside one, and the core is the only
+          thing lit in there. The climb is built from rooms with names, and a beam across the shaft
+          marks the checkpoint between each one. The bar above your ball shows everyone racing, and
+          gates turn faster and cut narrower the nearer you get to the top.
         </p>
       </section>
     </Modal>
