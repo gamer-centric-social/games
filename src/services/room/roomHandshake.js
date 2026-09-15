@@ -49,17 +49,15 @@ const normalizeName = (name) => String(name || '').trim().toLowerCase()
 /**
  * Find the seat an incoming peer is plausibly returning to.
  *
- * Three matches, in descending confidence: the same peer id, the same browser tab
- * (sessionId), or the same name. Name alone is weak, which is why a name match still
- * has to survive the liveness probe below.
+ * Two matches, in descending confidence: the same browser tab (sessionId), or the
+ * same name. Name alone is weak, which is why a name match still has to survive the
+ * liveness probe below. The same peer id is handled before this, in admitPlayer.
  */
-function findReturningSeat(players, { clientPeerId, sessionId, cleanName }) {
+function findReturningSeat(players, { sessionId, cleanName }) {
   return players.find(
     (p) =>
       !p.isHost &&
-      (p.peerId === clientPeerId ||
-        (sessionId && p.sessionId && p.sessionId === sessionId) ||
-        normalizeName(p.name) === cleanName)
+      ((sessionId && p.sessionId && p.sessionId === sessionId) || normalizeName(p.name) === cleanName)
   )
 }
 
@@ -109,6 +107,21 @@ export async function admitPlayer({ game, clientPeerId, clientPlayer, conn, net,
     return reject(conn, net, clientPeerId, 'Please enter a valid player name before joining.')
   }
 
+  // ---- One seat per connection -------------------------------------------
+  // A connection that already sits somewhere may only repeat its own JOIN. Without
+  // this, a seated player could JOIN again under a dropped player's name, hold both
+  // seats, and be sent both players' private state.
+  const heldSeat = game.players.find((p) => !p.isHost && p.peerId === clientPeerId)
+  if (heldSeat) {
+    if (normalizeName(heldSeat.name) !== cleanName) {
+      return reject(conn, net, clientPeerId, 'This connection already holds a seat.')
+    }
+    return {
+      status: isMatchInProgress(game) ? ADMIT.RECONNECTED : ADMIT.RECLAIMED,
+      player: heldSeat,
+    }
+  }
+
   // ---- Match already under way ------------------------------------------
   if (isMatchInProgress(game)) {
     // Only names captured when the match started may return. Without this, a stranger
@@ -117,7 +130,7 @@ export async function admitPlayer({ game, clientPeerId, clientPlayer, conn, net,
       ? game.lockedLobbyPlayerNames.has(cleanName)
       : game.players.some((p) => normalizeName(p.name) === cleanName)
 
-    const seat = findReturningSeat(game.players, { clientPeerId, sessionId, cleanName })
+    const seat = findReturningSeat(game.players, { sessionId, cleanName })
 
     if (!wasInLobby || !seat) {
       return reject(
@@ -152,7 +165,7 @@ export async function admitPlayer({ game, clientPeerId, clientPlayer, conn, net,
     )
   }
 
-  const seat = findReturningSeat(game.players, { clientPeerId, sessionId, cleanName })
+  const seat = findReturningSeat(game.players, { sessionId, cleanName })
   if (seat) {
     if (!(await seatIsStale(seat, clientPeerId, sessionId, net))) {
       return reject(
