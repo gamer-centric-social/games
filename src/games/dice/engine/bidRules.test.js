@@ -6,6 +6,7 @@ import {
   isLegalBid,
   minimumQuantityFor,
   smallestLegalBid,
+  suggestedBid,
 } from './bidRules'
 
 const b = (quantity, face) => ({ quantity, face })
@@ -130,6 +131,18 @@ describe('picker helpers', () => {
 
   it('smallestLegalBid finds the 1s escape at the top of the table', () => {
     expect(smallestLegalBid(b(10, 6), ctx(10))).toEqual(b(5, 1))
+  })
+
+  it('suggestedBid prefers the smallest raise on a normal face over switching to 1s', () => {
+    expect(suggestedBid(b(5, 3), ctx())).toEqual(b(5, 4))
+    expect(suggestedBid(b(5, 6), ctx())).toEqual(b(6, 2))
+    expect(suggestedBid(null, ctx())).toEqual(b(1, 2))
+  })
+
+  it('suggestedBid falls back to 1s when that is the only way up, and follows the palifico lock', () => {
+    expect(suggestedBid(b(10, 6), ctx(10))).toEqual(b(5, 1))
+    expect(suggestedBid(b(2, 1), ctx(20, PALIFICO))).toEqual(b(3, 1))
+    expect(suggestedBid(b(10, 1), ctx(10))).toBeNull()
   })
 
   it('smallestLegalBid is null when nothing can be bid', () => {

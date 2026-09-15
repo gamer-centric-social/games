@@ -39,7 +39,8 @@ export default function RevealPanel({ view }) {
       <div className="text-center space-y-1">
         <div className="font-mono text-5xl text-ink leading-none">{shown}</div>
         <Label>
-          {reveal.bid.face}s on the table · bid was {bidWords(reveal.bid)}
+          {reveal.bid.face}s{reveal.wild ? ' and wild 1s' : ''} on the table · bid was{' '}
+          {bidWords(reveal.bid)}
         </Label>
         {/* Fixed height, so the dice below do not jump when the verdict lands. */}
         <p

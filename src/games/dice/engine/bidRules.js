@@ -84,3 +84,18 @@ export function smallestLegalBid(prev, ctx) {
   }
   return null
 }
+
+/**
+ * The bid a picker should start on: the smallest raise on a normal face, and 1s
+ * only when that is the only way up (or the palifico lock says so). Switching to
+ * 1s often needs fewer dice, which is exactly why it must not be the default --
+ * a player who just taps "Bid" should not find they switched to 1s.
+ */
+export function suggestedBid(prev, ctx) {
+  let best = null
+  for (const face of [2, 3, 4, 5, 6]) {
+    const quantity = minimumQuantityFor(face, prev, ctx)
+    if (quantity !== null && (!best || quantity < best.quantity)) best = { quantity, face }
+  }
+  return best ?? smallestLegalBid(prev, ctx)
+}

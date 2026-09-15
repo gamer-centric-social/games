@@ -4,7 +4,7 @@ import Die from '../Die'
 import Button from '../../../../components/ui/Button'
 import IconButton from '../../../../components/ui/IconButton'
 import { EXACT_MIN_PLAYERS } from '../../constants/diceConstants'
-import { minimumQuantityFor, smallestLegalBid } from '../../engine/bidRules'
+import { minimumQuantityFor, suggestedBid } from '../../engine/bidRules'
 import { bidWords } from '../../utils/narration'
 import { FOCUS, cx } from '../../../../components/ui/tokens'
 
@@ -20,7 +20,7 @@ const SEND_LOCK_MS = 1500
  * quantity to its minimum.
  *
  * The parent keys this on the bid history, so it remounts for every new bid
- * and starts at the lowest legal raise.
+ * and starts on suggestedBid: the smallest raise on a normal face.
  */
 export default function BidPicker({ view, onIntent }) {
   const prev = view.currentBid
@@ -29,8 +29,8 @@ export default function BidPicker({ view, onIntent }) {
     palifico: view.palifico ? { seatId: view.palifico.seatId } : null,
   }
   const minimums = FACES.map((face) => minimumQuantityFor(face, prev, ctx))
-  const start = smallestLegalBid(prev, ctx)
-  const floor = start?.quantity ?? view.diceInPlay
+  const start = suggestedBid(prev, ctx)
+  const floor = Math.min(...minimums.filter((m) => m !== null), view.diceInPlay)
 
   const [quantity, setQuantity] = useState(start?.quantity ?? 1)
   const [face, setFace] = useState(start?.face ?? 2)
