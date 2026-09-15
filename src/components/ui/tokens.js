@@ -36,6 +36,7 @@ export const TONE_FILL = {
   uno: 'bg-uno text-table',
   tank: 'bg-tank text-table',
   dice: 'bg-dice text-table',
+  bounce: 'bg-bounce text-table',
   ok: 'bg-ok text-table',
   danger: 'bg-danger text-table',
   turn: 'bg-turn text-table',
@@ -51,6 +52,7 @@ export const TONE_WASH = {
   uno: 'bg-uno/10 border-uno/30 text-uno',
   tank: 'bg-tank/10 border-tank/30 text-tank',
   dice: 'bg-dice/10 border-dice/30 text-dice',
+  bounce: 'bg-bounce/10 border-bounce/30 text-bounce',
   ok: 'bg-ok/10 border-ok/30 text-ok',
   danger: 'bg-danger/10 border-danger/30 text-danger',
   turn: 'bg-turn/10 border-turn/30 text-turn',
@@ -66,6 +68,7 @@ export const TONE_TEXT = {
   uno: 'text-uno',
   tank: 'text-tank',
   dice: 'text-dice',
+  bounce: 'text-bounce',
   ok: 'text-ok',
   danger: 'text-danger',
   turn: 'text-turn',
@@ -80,6 +83,7 @@ export const TONE_BORDER = {
   uno: 'border-uno',
   tank: 'border-tank',
   dice: 'border-dice',
+  bounce: 'border-bounce',
 }
 
 /** Focus ring, offset so it clears a lifted surface. */

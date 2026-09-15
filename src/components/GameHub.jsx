@@ -36,6 +36,11 @@ const INK = {
     disc: 'ring-dice/40',
     hover: 'hover:border-dice/40',
   },
+  bounce: {
+    badge: 'text-bounce',
+    disc: 'ring-bounce/40',
+    hover: 'hover:border-bounce/40',
+  },
 }
 
 export default function GameHub({ onSelectGame, onOpenRulesForGame }) {

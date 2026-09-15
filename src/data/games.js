@@ -59,6 +59,19 @@ export const GAMES = [
     ink: 'dice',
     tags: ['Solo vs bots', 'Online multiplayer', 'Perudo rules'],
   },
+  {
+    id: 'bounce',
+    title: 'Bounce',
+    badge: 'Arcade',
+    tagline: 'Tap to climb. Pass only through your colour.',
+    description:
+      'A race up a shaft of turning colour gates. One tap lifts your ball, and it can only pass through an arc matching the colour it is holding. The wrong one drops you back to your last checkpoint. First to the top wins.',
+    playerCount: '2–6 players',
+    duration: '2–4 min',
+    emoji: '🔵',
+    ink: 'bounce',
+    tags: ['Time trial', 'Online multiplayer', 'One-tap'],
+  },
 ]
 
 /** Used by the Navbar, which used to keep its own hardcoded copy of these. */

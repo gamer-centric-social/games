@@ -534,3 +534,107 @@ export function playDieLostSound() {
   osc.start()
   osc.stop(ctx.currentTime + 0.28)
 }
+
+
+// Bounce: the tap that lifts the ball -- short and dry, because you make this
+// one several times a second and anything with a tail turns into mud
+export function playBounceTapSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  const now = ctx.currentTime
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(420, now)
+  osc.frequency.exponentialRampToValueAtTime(760, now + 0.06)
+  gain.gain.setValueAtTime(0.09, now)
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(now)
+  osc.stop(now + 0.08)
+}
+
+// Bounce: through a gate on the right colour
+export function playBounceGateSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  const now = ctx.currentTime
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'triangle'
+  osc.frequency.setValueAtTime(880, now)
+  osc.frequency.exponentialRampToValueAtTime(1320, now + 0.09)
+  gain.gain.setValueAtTime(0.1, now)
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(now)
+  osc.stop(now + 0.13)
+}
+
+// Bounce: the ball takes a new colour
+export function playBounceColorSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  const now = ctx.currentTime
+  for (let i = 0; i < 2; i++) {
+    const t = now + i * 0.06
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(i === 0 ? 660 : 990, t)
+    gain.gain.setValueAtTime(0.09, t)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(t)
+    osc.stop(t + 0.1)
+  }
+}
+
+// Bounce: a checkpoint banked, so the next mistake costs less
+export function playBounceCheckpointSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  const now = ctx.currentTime
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'triangle'
+  osc.frequency.setValueAtTime(520, now)
+  osc.frequency.exponentialRampToValueAtTime(780, now + 0.14)
+  gain.gain.setValueAtTime(0.14, now)
+  gain.gain.exponentialRampToValueAtTime(0.01, now + 0.22)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(now)
+  osc.stop(now + 0.23)
+}
+
+// Bounce: the wrong arc -- the long way back down
+export function playBounceFaultSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  const now = ctx.currentTime
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(300, now)
+  osc.frequency.exponentialRampToValueAtTime(90, now + 0.4)
+  gain.gain.setValueAtTime(0.16, now)
+  gain.gain.exponentialRampToValueAtTime(0.01, now + 0.42)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(now)
+  osc.stop(now + 0.43)
+}

@@ -1,5 +1,5 @@
 /**
- * Randomness is injected into the engine so tests can roll fixed dice.
+ * Randomness the engines share: injected so a test can fix the outcome.
  * A real game uses cryptoRng; tests use createSeededRng.
  */
 

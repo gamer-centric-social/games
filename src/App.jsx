@@ -5,6 +5,7 @@ import ImposterGame from './games/imposter/ImposterGame'
 import UnoGame from './games/uno/UnoGame'
 import TankGame from './games/tank/TankGame'
 import DiceGame from './games/dice/DiceGame'
+import BounceGame from './games/bounce/BounceGame'
 import { isSoundEnabled, setSoundEnabled } from './utils/sound'
 
 export default function App() {
@@ -12,7 +13,8 @@ export default function App() {
   const [initialRoomCode, setInitialRoomCode] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
-      if (params.get('game') === 'dice') return params.get('room') || ''
+      const deepLinked = params.get('game')
+      if (deepLinked === 'dice' || deepLinked === 'bounce') return params.get('room') || ''
       return params.get('room') || sessionStorage.getItem('uno_active_room') || ''
     }
     return ''
@@ -28,6 +30,9 @@ export default function App() {
       // Before UNO's branch, which claims any ?room= without a game.
       if (params.get('game') === 'dice') {
         return 'dice'
+      }
+      if (params.get('game') === 'bounce') {
+        return 'bounce'
       }
       if (params.get('room') || params.get('game') === 'uno' || sessionStorage.getItem('uno_active_room')) {
         return 'uno'
@@ -119,6 +124,15 @@ export default function App() {
 
         {selectedGame === 'dice' && (
           <DiceGame
+            onInGameChange={setInGame}
+            isRulesOpen={isRulesOpen}
+            onCloseRules={() => setIsRulesOpen(false)}
+            initialRoomCode={initialRoomCode}
+          />
+        )}
+
+        {selectedGame === 'bounce' && (
+          <BounceGame
             onInGameChange={setInGame}
             isRulesOpen={isRulesOpen}
             onCloseRules={() => setIsRulesOpen(false)}
