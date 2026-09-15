@@ -24,7 +24,9 @@ export function getClientSessionId() {
   try {
     let sid = sessionStorage.getItem('uno_session_id')
     if (!sid) {
-      sid = 'sid_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36)
+      // getRandomValues, not randomUUID: the latter is missing on plain-http LAN dev.
+      const bytes = crypto.getRandomValues(new Uint8Array(16))
+      sid = 'sid_' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
       sessionStorage.setItem('uno_session_id', sid)
     }
     return sid

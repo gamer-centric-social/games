@@ -17,6 +17,7 @@ import {
   resetToLobby,
   isMatchInProgress,
   sanitizePlayers,
+  publicRoster,
   handOf,
   playCard,
   drawCard,
@@ -683,7 +684,7 @@ export default function UnoGame({
         hostNetworkRef.current.broadcast({
           type: 'ROOM_UPDATE',
           roomCode: g.roomCode,
-          players: reIndexed,
+          players: publicRoster(g),
           maxPlayers: g.maxPlayers || 4,
           stackingEnabled: g.stackingEnabled !== false,
         })
@@ -858,7 +859,7 @@ export default function UnoGame({
           type: 'WELCOME',
           playerId: result.player.id,
           roomCode: g.roomCode,
-          players: g.players,
+          players: publicRoster(g),
           maxPlayers: g.maxPlayers || 4,
           stackingEnabled: g.stackingEnabled !== false,
         }
@@ -925,7 +926,7 @@ export default function UnoGame({
           hostNetworkRef.current?.broadcast({
             type: 'ROOM_UPDATE',
             roomCode: g.roomCode,
-            players: g.players,
+            players: publicRoster(g),
             maxPlayers: g.maxPlayers || 4,
             stackingEnabled: g.stackingEnabled !== false,
           })
@@ -1496,7 +1497,7 @@ export default function UnoGame({
     if (hostNetworkRef.current) {
       hostNetworkRef.current.broadcast({
         type: 'ROOM_RESET_TO_LOBBY',
-        players: g.players,
+        players: publicRoster(g),
       })
     }
     setMpConnectionStatus('connected')
