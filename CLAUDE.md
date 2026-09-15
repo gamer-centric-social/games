@@ -3,7 +3,7 @@
 Party Arcade — a mobile-first React SPA hosting five party games: **Imposter**
 (pass-and-play), **UNO** (solo-vs-AI and P2P multiplayer), **Tank Arena**
 (real-time P2P), **Liar's Dice** (Perudo, solo-vs-bots and P2P multiplayer) and
-**Bounce** (a one-tap colour-gated climb, time trial and P2P race).
+**Bounce** (a one-tap colour-gated climb through rooms of turning gates, time trial and P2P race).
 Everything runs in the browser; multiplayer is peer-to-peer over WebRTC with no game
 server.
 
@@ -136,6 +136,20 @@ continuous as the camera scrolls and never resets. Progress reads as luminance, 
 is fixed at the top of the course and does not animate, and both ends of the ramp lie
 between tokens the palette already has, so no second ground enters the design.
 
+A **chamber** is the one place that ramp does not reach, and it extends the rule rather
+than breaking it: the wall occludes the shaft, the interior is a pocket of dark, and the
+cycling core inside is the only light source in the room. One light source per space, still
+— and the colour you are about to carry out is literally what you are reading by. It needs
+no new palette value, and it makes a chamber unmistakable from three hundred units below.
+
+Two other marks in `render/` encode something true rather than decorating. A gate's
+**rhythm mark** says how it moves, because a ring, a pendulum and a ratchet are identical
+in a still frame and you would otherwise only learn which is which by being caught out:
+teeth for the ratchet, a pivot for the pendulum, nothing for the plain ring, since marking
+everything marks nothing. And the core is drawn as an **annulus, not a disc** — a filled
+core is exactly the size and shape of a ball and paints it its own colour, which left the
+two indistinguishable at the moment you most need to see where you are.
+
 Whose turn it is is also said only in light and geometry, three times over: `.uno-seat-spot`
 puts the lamp on the active seat (there are two seat states, lit or in shadow -- a third
 "next" tone is what made the first two hard to separate), `.uno-hand-live` lights the rule
@@ -238,9 +252,45 @@ at all. `requestAnimationFrame` lives in exactly one place, `hooks/useBounceLoop
 the step is a fixed 1/120s accumulator — a 120Hz phone and a 60Hz phone must play the same
 game, which Tank's `setInterval(32)` does not guarantee.
 
+**Because every device builds the course itself, `PROTOCOL_VERSION` is load-bearing in a
+way it is not elsewhere.** Change anything a seed feeds — `engine/gates.js`,
+`engine/segments.js`, `engine/courseGen.js`, or any constant they read — and an old client
+given a new seed builds a course nobody else has, then reports heights against geometry
+that exists for no one but itself. It does not error; it desyncs in silence. Bump the
+version in the same commit, every time, and bump `BEST_TIME_KEY` too if the course height
+moved, since a record set on a different climb is not a record.
+
+### Bounce's three engine modules
+
+- **`engine/gates.js`** is the registry, and the reason it exists is that *both the engine
+  and the renderer read it*. A gate is one idea — a height, and a function from time to
+  the colour covering the crossing point — and a ring, pendulum, ratchet, slider and
+  shutter are five spellings of that function. A gate drawn a few degrees from where the
+  engine will test it is the worst bug available here: you would lose races you had played
+  correctly and no screenshot would show why. Two implementations drift, so there is one,
+  and `gates.test.js` checks `arcsAt` against `arcColorAt` rather than against a
+  hand-written expectation. Same argument as `utils/colorGlyphs.js`.
+- **`engine/segments.js`** holds the rooms. A course is a stack of them — gauntlet, sweep,
+  carousel, ratchet run, chamber, breather — each with its own character and its own
+  height, and `courseGen.js` only assembles. Checkpoints land on the seams, which is why
+  a respawn never drops you inside a gauntlet or inside a chamber, and why the old
+  nudge-it-off-the-line hack is gone. Pacing is a rule rather than a hope: never three
+  demanding rooms running, never two breathers or two chambers adjacent, never the same
+  room three times over.
+- **`engine/bounceEngine.js`** gained one piece of state, `run.inside`, and with it the
+  chamber: a room you are held in rather than a gate you pass. Its lip is crossed once and
+  is not gated at all; its ceiling is the only way out and is a fault if it is showing the
+  wrong colour; its core paints you continuously while you overlap it. The core is the one
+  **overlap** test on the course and that is only safe because it is thick — a substep at
+  terminal velocity covers about twelve units and the core band is over a hundred. Gate
+  outlines are not thick, which is why they stay plane crossings. A chamber is solid in
+  **both** directions: drop back through the ceiling you just left and you are in it again,
+  on the same floor, because otherwise a floor you rested on a moment ago would have
+  quietly become air.
+
 ## Before claiming a change works
 
-Run `npm test` (573 tests) and `npm run lint`. The engine tests exist because the UNO
+Run `npm test` (690 tests) and `npm run lint`. The engine tests exist because the UNO
 rules and the Tank collision maths are easy to break silently.
 
 Where the coverage is:
@@ -269,10 +319,12 @@ Where the coverage is:
 | `dice/utils/narration.js` | 12 |
 | `dice/utils/diceAi.js` | 5 |
 | `utils/rng.js` | 3 |
-| `bounce/engine/courseGen.js` | 13 |
-| `bounce/engine/bounceEngine.js` | 23 |
-| `bounce/engine/raceState.js` | 30 |
-| `bounce/services/bounceTable.js` | 28 |
+| `bounce/engine/gates.js` | 38 |
+| `bounce/engine/segments.js` | 56 |
+| `bounce/engine/courseGen.js` | 29 |
+| `bounce/engine/bounceEngine.js` | 29 |
+| `bounce/engine/raceState.js` | 32 |
+| `bounce/services/bounceTable.js` | 27 |
 | `bounce/services/bounceHost.js` | 13 |
 
 The notable gap is `uno/hooks/useUnoAiGame.js` — solo-vs-AI holds its state in React,
@@ -287,7 +339,7 @@ For Liar's Dice the invariant is that a resolved challenge moves the total dice 
 -1, or +1 (a successful Exact below five dice), or 0 (a successful Exact at five), and
 every seat stays within 0..5. `diceEngine.test.js` plays seeded games to the end against it.
 
-Bounce has three invariants, and each has a test that would be easy to lose:
+Bounce has five invariants, and each has a test that would be easy to lose:
 
 - a run's `checkpointIndex` never decreases;
 - an accepted height never exceeds the previous one by more than `MAX_CLIMB_RATE × dt`,
@@ -297,10 +349,34 @@ Bounce has three invariants, and each has a test that would be easy to lose:
   tunnelling, and never twice, which is a double penalty. At terminal velocity a
   substep covers far more ground than a ring outline is thick, so crossings are
   resolved as plane crossings rather than containment tests. `bounceEngine.test.js`
-  sweeps a course at terminal velocity and counts.
+  sweeps a course at terminal velocity and counts. A **chamber ceiling** is the one
+  exception and it is deliberate: it is evaluated on every upward approach, because you
+  may rise at it, think better of it, and drop back as often as you like;
+- **no gate ever offers a colour for less time than a person can react to.** Difficulty
+  is a narrower window; it is never a coin flip. `gates.test.js` proves `windowSeconds`
+  never over-reports what a gate really gives, and `courseGen.test.js` holds every gate
+  on every seed to `MIN_GATE_WINDOW_SECONDS` — together those two are a claim about the
+  real windows and not just about the arithmetic. The paired trap is an **oscillating**
+  gate that does not sweep its whole cycle: a pendulum swinging less than half a turn, or
+  a shutter sliding less than half a pattern, leaves a colour that never arrives at all,
+  and a ball holding it waits at that gate forever;
+- **a chamber's clear interior travel exceeds two tap apexes.** Hitting the ceiling on the
+  wrong colour costs you the room, which is only fair because you cannot arrive there
+  without deciding to: no single tap, from the floor or from the core, gets close. Note
+  that the discrete apex is slightly *under* `TAP_APEX` — stepping at a fixed dt lands
+  about half a step short — so the bound holds with room to spare, and `bounceEngine`
+  asserts a tap never overshoots the figure the constant assumes.
 
 `bounceTable.test.js` also climbs whole courses with a lookahead autopilot, which is
-the standing check that a generated course is never a dead end.
+the standing check that a generated course is never a dead end. It has to *play* a
+chamber rather than batter it: a ring is a one-tap decision the ordinary lookahead
+settles, but a chamber takes three taps, each harmless alone while the three together
+commit you. So it probes the whole ascent and re-reads the room every frame, aborting
+back to the floor rather than committing to a plan drawn a substep at a time — the table
+decides once a frame and queues the tap, so any such plan drifts. A climber that simply
+hammered upward would also reach the line eventually, by faulting until the dice came
+good, and then that file would prove much less than it claims; it is asserted to escape
+every chamber it enters, first time.
 
 For anything touching networking or controls, test on two real devices. A dev-server
 tab talking to another tab on the same machine does not exercise ICE, NAT or touch

@@ -638,3 +638,47 @@ export function playBounceFaultSound() {
   osc.start(now)
   osc.stop(now + 0.43)
 }
+
+// Bounce: the chamber lip closing behind the ball. Low and dull and a little
+// final -- you are in the room now, and the only way on is up through the top
+export function playBounceIrisSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  const now = ctx.currentTime
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(220, now)
+  osc.frequency.exponentialRampToValueAtTime(96, now + 0.22)
+  gain.gain.setValueAtTime(0.14, now)
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.26)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start(now)
+  osc.stop(now + 0.27)
+}
+
+// Bounce: out through the chamber ceiling. The release the whole room was for,
+// so it is the one gate sound with any lift to it
+export function playBounceEscapeSound() {
+  if (!soundEnabled) return
+  const ctx = getAudioContext()
+  if (!ctx) return
+
+  const now = ctx.currentTime
+  for (let i = 0; i < 3; i++) {
+    const t = now + i * 0.05
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime([784, 988, 1319][i], t)
+    gain.gain.setValueAtTime(0.1, t)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.16)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(t)
+    osc.stop(t + 0.17)
+  }
+}

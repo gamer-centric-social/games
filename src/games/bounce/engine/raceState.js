@@ -1,9 +1,9 @@
 import {
-  CHECKPOINT_SPAN,
   CLIMB_ALLOWANCE,
   CLIMB_TOLERANCE,
   COURSE_HEIGHT,
   MAX_CLIMB_RATE,
+  MIN_CHECKPOINT_SPAN,
   MIN_FINISH_MS,
   MIN_PLAYERS,
   STALE_REPORT_MS,
@@ -129,9 +129,15 @@ export function applyProgress(race, seatId, report, nowMs) {
   seat.progress = Math.max(seat.progress, y)
 
   // A checkpoint you have not climbed to is not a checkpoint you hold.
+  //
+  // Checkpoints sit on the seams between rooms rather than on a fixed grid, so
+  // the host cannot derive an exact index from a height without building the
+  // course. It does not need to: no two checkpoints can be closer together than
+  // the shortest room, so dividing by that is a sound ceiling on the claim, and a
+  // ceiling is all this ever was.
   const claimed = Number(report?.checkpointIndex)
   if (Number.isFinite(claimed)) {
-    const reachable = Math.floor(seat.progress / CHECKPOINT_SPAN)
+    const reachable = Math.floor(seat.progress / MIN_CHECKPOINT_SPAN)
     seat.checkpointIndex = Math.max(seat.checkpointIndex, Math.min(Math.max(claimed, 0), reachable))
   }
 
@@ -168,7 +174,6 @@ export function applyFinish(race, seatId, nowMs) {
   seat.finishMs = elapsed
   seat.y = race.height
   seat.progress = race.height
-  seat.checkpointIndex = Math.floor(race.height / CHECKPOINT_SPAN)
   seat.lastReportMs = nowMs
   seat.rank = race.players.filter((p) => p.finished).length
 

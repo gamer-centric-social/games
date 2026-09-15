@@ -1,4 +1,4 @@
-import { CHECKPOINT_SPAN, SHAFT_WIDTH } from '../constants/bounceConstants'
+import { SHAFT_WIDTH } from '../constants/bounceConstants'
 
 /**
  * The signature: the shaft brightens as you climb, and the finish is the lamp.
@@ -54,22 +54,38 @@ export function drawShaft(ctx, { view, course }) {
     ctx.fillRect(right - WALL, sy, WALL, 3)
   }
 
-  // Checkpoints: the line you fall back to, so it is drawn as a floor.
+  drawSeams(ctx, { course, view, left, right })
+
+  if (view.top >= height - 200) drawFinish(ctx, { view, height, left, right })
+}
+
+/**
+ * The seams between rooms, which are also the checkpoints.
+ *
+ * Drawn from the course's own list rather than stepped off a fixed grid: the
+ * climb is a stack of rooms of differing heights now, so there is no stride to
+ * walk. Each seam gets a lintel as well as the dashed line -- it is a floor you
+ * fall back to, and it is the edge of the room you are in, and both of those are
+ * worth being able to see coming.
+ */
+function drawSeams(ctx, { course, view, left, right }) {
   ctx.save()
-  ctx.setLineDash([18, 14])
-  ctx.lineWidth = 3
-  ctx.strokeStyle = 'rgba(255,231,190,0.36)'
-  const firstCheckpoint = Math.max(0, Math.floor(view.bottom / CHECKPOINT_SPAN) * CHECKPOINT_SPAN)
-  for (let y = firstCheckpoint; y <= view.top && y <= height; y += CHECKPOINT_SPAN) {
-    const sy = view.y(y)
+  for (const checkpoint of course.checkpoints) {
+    if (checkpoint.y < view.bottom || checkpoint.y > view.top) continue
+    const sy = view.y(checkpoint.y)
+
+    ctx.fillStyle = 'rgba(255,231,190,0.16)'
+    ctx.fillRect(left + WALL, sy - 7, right - left - WALL * 2, 7)
+
+    ctx.setLineDash([18, 14])
+    ctx.lineWidth = 3
+    ctx.strokeStyle = 'rgba(255,231,190,0.36)'
     ctx.beginPath()
     ctx.moveTo(left + WALL, sy)
     ctx.lineTo(right - WALL, sy)
     ctx.stroke()
   }
   ctx.restore()
-
-  if (view.top >= height - 200) drawFinish(ctx, { view, height, left, right })
 }
 
 /** The lamp itself, once it comes into view. */

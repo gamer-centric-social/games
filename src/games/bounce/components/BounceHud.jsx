@@ -43,6 +43,12 @@ export default function BounceHud({
           <span className="font-display text-sm leading-none text-ink">{config.name}</span>
         </div>
 
+        {hud?.room && (
+          <span className="hidden sm:block font-mono text-micro leading-none text-ink-faint truncate">
+            {hud.room}
+          </span>
+        )}
+
         <div className="ml-auto flex items-center gap-2">
           <div className="text-right">
             <Label>Climbed</Label>
@@ -65,12 +71,49 @@ export default function BounceHud({
         </div>
       </div>
 
+      {hud?.inside && hud?.ceiling && <CeilingStrip ceiling={hud.ceiling} holding={color} />}
+
       <BounceRail seats={seats} yourId={yourId} localProgress={hud?.maxY ?? 0} bestMs={bestMs} />
 
       {/* The only channel that reaches a screen reader. */}
       <p aria-live="polite" className="sr-only">
-        {`Holding ${config.name}. Checkpoint ${hud?.checkpointIndex ?? 0}. ${percent} percent climbed.`}
+        {hud?.inside && hud?.ceiling
+          ? `In the chamber. Holding ${config.name}. The ceiling shows ${COLOR_CONFIG[hud.ceiling].name}, ` +
+            `${hud.ceiling === color ? 'which matches: climb now.' : 'which does not match: wait on the floor.'}`
+          : `Holding ${config.name}${hud?.room ? ` in the ${hud.room}` : ''}. ` +
+            `Checkpoint ${hud?.checkpointIndex ?? 0}. ${percent} percent climbed.`}
       </p>
+    </div>
+  )
+}
+
+/**
+ * What the ceiling is showing, while a chamber is holding you.
+ *
+ * The one moment on the course where reading a colour wrong costs a whole room
+ * rather than a beat, so it is said in words and in a shape as well as in colour,
+ * and it is the only strip that ever appears here.
+ */
+function CeilingStrip({ ceiling, holding }) {
+  const open = ceiling === holding
+  return (
+    <div
+      className={cx(
+        'flex items-center gap-2 px-3 py-1.5 rounded-object bg-well shadow-sink',
+        open && 'ring-1 ring-bounce/50'
+      )}
+    >
+      <span className="font-mono text-micro uppercase tracking-wide text-ink-faint">Ceiling</span>
+      <BounceGlyph color={ceiling} size={16} />
+      <span className="font-display text-sm leading-none text-ink">{COLOR_CONFIG[ceiling].name}</span>
+      <span
+        className={cx(
+          'ml-auto font-mono text-micro leading-none',
+          open ? 'text-bounce' : 'text-ink-faint'
+        )}
+      >
+        {open ? 'open — climb' : 'shut — hold'}
+      </span>
     </div>
   )
 }

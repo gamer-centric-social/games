@@ -1,3 +1,4 @@
+import { ARC_KINDS, arcsAt, BAND_KINDS, offsetAt, TAU } from '../engine/gates'
 import {
   COLOR_CONFIG,
   RING_STROKE,
@@ -6,6 +7,7 @@ import {
   SLIDER_SEGMENT,
   SWATCH_RADIUS,
 } from '../constants/bounceConstants'
+import { drawChamber } from './drawChamber'
 import { drawGlyph } from '../utils/colorGlyphs'
 
 /**
@@ -15,60 +17,108 @@ import { drawGlyph } from '../utils/colorGlyphs'
  * on its own is a rule you cannot see if you are colour blind. A small notch marks
  * where the ball will cross, so timing is about the turn of the ring rather than
  * about guessing the geometry.
+ *
+ * Where each arc *is* comes from engine/gates.js, never from a copy of the maths
+ * kept over here. A ring drawn a few degrees from where the engine will test it
+ * would cost you races you had played correctly, and nothing in a screenshot
+ * would show it -- so the two read the same function and cannot drift.
  */
 
-const QUADRANT = Math.PI / 2
 const SLIDER_WIDTH = SLIDER_SEGMENT * 4
 const hex = (color) => COLOR_CONFIG[color].hex
 const glyphOf = (color) => COLOR_CONFIG[color].glyph
 
-export function drawObstacles(ctx, { course, view, t }) {
-  for (const element of course.elements) {
-    if (element.y < view.bottom || element.y > view.top) continue
-    if (element.kind === 'ring') drawRing(ctx, element, view, t)
-    else if (element.kind === 'slider') drawSlider(ctx, element, view, t)
-    else drawSwatch(ctx, element, view)
+export function drawObstacles(ctx, { course, view, t, run }) {
+  for (let index = 0; index < course.elements.length; index++) {
+    const element = course.elements[index]
+    // A chamber is far taller than a ring, so it is culled on its own extent.
+    const reach = element.radius ?? 0
+    if (element.y + reach < view.bottom || element.y - reach > view.top) continue
+
+    if (element.kind === 'chamber') {
+      drawChamber(ctx, { element, view, t, inside: run?.inside === index })
+    } else if (ARC_KINDS.has(element.kind)) {
+      drawArcGate(ctx, element, view, t)
+    } else if (BAND_KINDS.has(element.kind)) {
+      drawBandGate(ctx, element, view, t)
+    } else {
+      drawSwatch(ctx, element, view)
+    }
   }
 }
 
-function drawRing(ctx, ring, view, t) {
+/** A ring, a pendulum or a ratchet: four arcs on a circle, met at the bottom. */
+function drawArcGate(ctx, element, view, t) {
   const cx = view.x(0)
-  const cy = view.y(ring.y)
-  const theta = ring.phase + ring.omega * t
+  const cy = view.y(element.y)
 
   ctx.save()
   ctx.lineWidth = RING_STROKE
   ctx.lineCap = 'butt'
 
-  for (let i = 0; i < 4; i++) {
-    const from = theta + i * QUADRANT
-    const to = from + QUADRANT
-    ctx.strokeStyle = hex(ring.colors[i])
+  for (const arc of arcsAt(element, t)) {
+    ctx.strokeStyle = hex(arc.color)
     ctx.beginPath()
     // Canvas angles run backwards, so the arc is walked from its far edge.
-    ctx.arc(cx, cy, ring.radius, view.angle(to), view.angle(from))
+    ctx.arc(cx, cy, element.radius, view.angle(arc.to), view.angle(arc.from))
     ctx.stroke()
 
-    const mid = from + QUADRANT / 2
+    const mid = (arc.from + arc.to) / 2
+    // An iris ring's slivers are narrower than a glyph, so the glyph gives way.
+    const room = (arc.to - arc.from) * element.radius
     ctx.fillStyle = 'rgba(22,18,15,0.82)'
     drawGlyph(
       ctx,
-      glyphOf(ring.colors[i]),
-      cx + ring.radius * Math.cos(view.angle(mid)),
-      cy + ring.radius * Math.sin(view.angle(mid)),
-      RING_STROKE * 0.78
+      glyphOf(arc.color),
+      cx + element.radius * Math.cos(view.angle(mid)),
+      cy + element.radius * Math.sin(view.angle(mid)),
+      Math.min(RING_STROKE * 0.78, room * 0.62)
     )
   }
   ctx.restore()
 
-  drawNotch(ctx, cx, cy + ring.radius + RING_STROKE / 2 + 6)
+  drawRhythmMark(ctx, element, view, cx, cy)
+  drawNotch(ctx, cx, cy + element.radius + RING_STROKE / 2 + 6)
 }
 
-function drawSlider(ctx, slider, view, t) {
-  const sy = view.y(slider.y)
+/**
+ * How this gate moves, said in geometry.
+ *
+ * A ring, a pendulum and a ratchet are all four arcs on a circle, so a still
+ * frame of them is identical and you only learn which is which by watching one
+ * long enough to be caught out by it. One mark each fixes that: teeth for the
+ * ratchet, because it moves in clicks, and a pivot for the pendulum, because it
+ * hangs from a point and swings back. A plain ring gets nothing -- it is the
+ * default, and marking everything marks nothing.
+ */
+function drawRhythmMark(ctx, element, view, cx, cy) {
+  if (element.kind === 'ring') return
+
+  ctx.save()
+  ctx.fillStyle = 'rgba(255,231,190,0.45)'
+
+  if (element.kind === 'ratchet') {
+    const r = element.radius + RING_STROKE / 2 + 5
+    for (let i = 0; i < 8; i++) {
+      const a = view.angle(element.phase + (i / 8) * TAU)
+      ctx.beginPath()
+      ctx.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 2.6, 0, TAU)
+      ctx.fill()
+    }
+  } else {
+    ctx.beginPath()
+    ctx.arc(cx, cy, 5, 0, TAU)
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
+/** A slider or a shutter: a band of four colours crossing the shaft. */
+function drawBandGate(ctx, element, view, t) {
+  const sy = view.y(element.y)
   const left = view.x(-SHAFT_WIDTH / 2) + 16
   const right = view.x(SHAFT_WIDTH / 2) - 16
-  const offset = (((slider.offset + slider.speed * t) % SLIDER_WIDTH) + SLIDER_WIDTH) % SLIDER_WIDTH
+  const offset = (((offsetAt(element, t) % SLIDER_WIDTH) + SLIDER_WIDTH) % SLIDER_WIDTH)
 
   ctx.save()
   ctx.beginPath()
@@ -79,10 +129,10 @@ function drawSlider(ctx, slider, view, t) {
   for (let pass = -1; pass <= 1; pass++) {
     for (let i = 0; i < 4; i++) {
       const segLeft = view.x(-SHAFT_WIDTH / 2) + offset + i * SLIDER_SEGMENT + pass * SLIDER_WIDTH
-      ctx.fillStyle = hex(slider.colors[i])
+      ctx.fillStyle = hex(element.colors[i])
       ctx.fillRect(segLeft, sy - SLIDER_HEIGHT / 2, SLIDER_SEGMENT, SLIDER_HEIGHT)
       ctx.fillStyle = 'rgba(22,18,15,0.82)'
-      drawGlyph(ctx, glyphOf(slider.colors[i]), segLeft + SLIDER_SEGMENT / 2, sy, SLIDER_HEIGHT * 0.8)
+      drawGlyph(ctx, glyphOf(element.colors[i]), segLeft + SLIDER_SEGMENT / 2, sy, SLIDER_HEIGHT * 0.8)
     }
   }
   ctx.restore()
