@@ -32,8 +32,8 @@ export default function ChatModal({
   onClose,
   messages = [],
   onSendMessage,
-  currentUserId,
   roomCode = '',
+  tone = 'lamp', // the game's ink -- this modal is shared, so it must not pick one
 }) {
   const [inputText, setInputText] = useState('')
   const [viewportStyle, setViewportStyle] = useState({})
@@ -186,7 +186,7 @@ export default function ChatModal({
         {/* Pinned Header */}
         <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4 border-b border-edge">
           <div className="flex items-center gap-2.5 min-w-0">
-            <Pill tone="uno">Chat</Pill>
+            <Pill tone={tone}>Chat</Pill>
             {roomCode && (
               <span className="font-mono text-nano text-ink-faint tracking-wider">
                 {roomCode}
@@ -227,14 +227,13 @@ export default function ChatModal({
             </div>
           ) : (
             messages.map((msg) => {
-              const isMe = msg.senderId === currentUserId
-
-              if (isMe) {
+              // Set where the message was typed; seat ids renumber, so never compare senderId.
+              if (msg.isOwn) {
                 return (
                   <div key={msg.id} className="flex flex-col items-end">
                     <div
                       className={cx(
-                        'max-w-[85%] px-3 py-2 rounded-object rounded-tr-xs',
+                        'max-w-[85%] px-3 py-2 rounded-object rounded-tr-well',
                         'bg-felt-high border border-edge text-ink text-sm shadow-lift-0 break-words'
                       )}
                     >
@@ -263,7 +262,7 @@ export default function ChatModal({
                     </div>
                     <div
                       className={cx(
-                        'px-3 py-2 rounded-object rounded-tl-xs',
+                        'px-3 py-2 rounded-object rounded-tl-well',
                         'bg-well border border-edge text-ink text-sm shadow-sink break-words'
                       )}
                     >
@@ -296,7 +295,6 @@ export default function ChatModal({
             label="Send message"
             size="md"
             active={Boolean(inputText.trim())}
-            onClick={handleSubmit}
             className="shrink-0"
           >
             <Send className="w-4 h-4 text-ink" />

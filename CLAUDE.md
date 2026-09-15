@@ -1,9 +1,10 @@
 # CLAUDE.md
 
-Party Arcade — a mobile-first React SPA hosting three party games: **Imposter**
-(pass-and-play), **UNO** (solo-vs-AI and P2P multiplayer), and **Tank Arena**
-(real-time P2P). Everything runs in the browser; multiplayer is peer-to-peer over
-WebRTC with no game server.
+Party Arcade — a mobile-first React SPA hosting four party games: **Imposter**
+(pass-and-play), **UNO** (solo-vs-AI and P2P multiplayer), **Tank Arena**
+(real-time P2P), and **Liar's Dice** (Perudo, solo-vs-bots and P2P multiplayer).
+Everything runs in the browser; multiplayer is peer-to-peer over WebRTC with no game
+server.
 
 ## Commands
 
@@ -42,8 +43,12 @@ src/
   components/             hub UI (Navbar, GameHub). Nothing game-specific.
   components/ui/          the design system: Button, Modal, Screen, Pill, inputs, roster
   services/               cross-game infrastructure (peerConfig.js: ICE/TURN + room codes + share links)
-  hooks/                  HUB-ONLY shared React hooks (useCopyFeedback)
-  utils/sound.js          Web Audio synth shared by all three games
+  services/room/          shared P2P rooms: roomNetwork (PeerJS host/client), roomHandshake
+                          (admission + seat reclaim), roomChat (the host-stamped chat relay)
+  services/chat/          room chat: ChatService, transport, chatRelay
+  components/room/        shared lobby screens (JoinCreate, RoomWaiting), coloured by `tone`
+  hooks/                  HUB-ONLY shared React hooks (useCopyFeedback, useChat, useRoomChat)
+  utils/sound.js          Web Audio synth shared by all four games
   data/games.js           hub card metadata
   games/<game>/
     <Game>.jsx            composition + screen routing only
@@ -61,7 +66,7 @@ Rules of thumb:
   not belong in `src/components/`, `src/data/` or `src/utils/`.
 - `components/ui/` is the exception, and the only one: it holds cross-game *presentation*
   primitives that know nothing about any game. Per-game colour reaches them as a `tone`
-  prop (`imposter` / `uno` / `tank`), never as a literal class string. Build a screen out
+  prop (`imposter` / `uno` / `tank` / `dice`), never as a literal class string. Build a screen out
   of these rather than writing a new class string — the app previously had 856 `className`
   attributes spelling out 576 distinct strings, which is how eight different modal panels
   and three incompatible primary buttons happened.
@@ -70,6 +75,8 @@ Rules of thumb:
   into sound, broadcasts, modals and timers. That is what keeps them unit-testable.
   - UNO: `(game, ...args) => { ok, reason?, events }`, mutating `game` in place.
   - Tank: `stepWorld(world, inputs) => { world, events }`, returning a new world.
+  - Liar's Dice: the UNO shape, `(game, ...args) => { ok, reason?, events }`, with
+    randomness injected (`rng`) so tests roll fixed dice.
 - When a file passes ~400 lines, that is the signal to split it, not a target to beat.
 
 ## Design system
@@ -88,7 +95,7 @@ top of the viewport, and every surface obeys it**:
 - the lamp itself is `.table-lamp` on the app root. It does not move and does not animate.
 
 The shell is deliberately almost colourless. **The only saturated colour in the app comes
-from the three game inks** (`imposter` / `uno` / `tank`) plus the semantic `ok` / `danger`
+from the four game inks** (`imposter` / `uno` / `tank` / `dice`) plus the semantic `ok` / `danger`
 / `turn`. No gradients — the red-to-amber-to-emerald and cyan-to-blue buttons the three
 games each had were the most generic thing in the repo.
 
@@ -141,14 +148,34 @@ Never let a client mutate game state locally and assume it sticks. Optimistic lo
 updates are fine — the host's next broadcast is the truth. Never trust a value a client
 sent as game-affecting input without re-deriving or validating it host-side.
 
-The host is also a player: `playerId` 0 in UNO, slot `p1` (blue) in Tank.
+Room chat obeys the same rule. The host rebuilds every client `CHAT_MESSAGE` with
+`stampChatPacket` (`services/chat/chatRelay.js`), taking the sender from the seat the
+connection holds, and relays only what its own `ChatService` accepted. Whether a message is
+yours is `msg.isOwn`, set where it was typed -- never `senderId`, because lobby seat ids
+are renumbered when someone leaves.
+
+The host is also a player: `playerId` 0 in UNO and Liar's Dice, slot `p1` (blue) in Tank.
+
+**Liar's Dice is the reference for new networked games.** It is built on
+`services/room/` rather than its own copy of the PeerJS plumbing (UNO and Tank still
+have theirs; UNO migrates later, as its own two-device-tested change). Its shape:
+
+- one pure engine, driven by one controller, `games/dice/services/diceTable.js`, which
+  owns every timer (bot turns, the reveal hold, covering a dropped player, the forfeit).
+  Solo runs it locally; the online host runs the same one. It is plain JS, so it is
+  tested with fake timers -- the gap UNO has in `useUnoAiGame.js` does not exist here.
+- the only thing a client ever receives is `snapshotFor(game, theirSeatId)`: their own
+  dice, everyone else as counts, every cup only during the reveal. Lobby and match
+  alike, so a client has one code path.
+- `JOIN` carries a protocol version the host checks, so a stale client is refused with
+  a message instead of desyncing.
 
 Host state deliberately lives in a `useRef`, not `useState`, so it is immune to stale
 closures inside network callbacks and timers. Keep it that way.
 
 ## Before claiming a change works
 
-Run `npm test` (319 tests) and `npm run lint`. The engine tests exist because the UNO
+Run `npm test` (456 tests) and `npm run lint`. The engine tests exist because the UNO
 rules and the Tank collision maths are easy to break silently.
 
 Where the coverage is:
@@ -167,6 +194,16 @@ Where the coverage is:
 | `tank/utils/arenaGeometry.js` | 14 |
 | `tank/utils/joystickMath.js` | 12 |
 | `tank/utils/tankHud.js` | 3 |
+| `services/chat/ChatService.js` + `chatTypes.js` | 14 |
+| `services/chat/chatRelay.js` | 11 |
+| `services/room/roomHandshake.js` | 20 |
+| `services/room/roomChat.js` | 7 |
+| `dice/engine/bidRules.js` | 22 |
+| `dice/engine/diceEngine.js` | 32 |
+| `dice/services/diceTable.js` | 11 |
+| `dice/utils/narration.js` | 12 |
+| `dice/utils/diceAi.js` | 5 |
+| `dice/utils/rng.js` | 3 |
 
 The notable gap is `uno/hooks/useUnoAiGame.js` — solo-vs-AI holds its state in React,
 so it cannot be tested without a renderer. Treat changes there as unverified and play a
@@ -175,6 +212,10 @@ solo game through.
 For rules changes, the invariant to check by hand is that a UNO deck stays whole:
 `sum(all hands) + drawPile + discardPile === 108` (216 with 6+ players, which uses two
 decks).
+
+For Liar's Dice the invariant is that a resolved challenge moves the total dice by exactly
+-1, or +1 (a successful Exact below five dice), or 0 (a successful Exact at five), and
+every seat stays within 0..5. `diceEngine.test.js` plays seeded games to the end against it.
 
 For anything touching networking or controls, test on two real devices. A dev-server
 tab talking to another tab on the same machine does not exercise ICE, NAT or touch

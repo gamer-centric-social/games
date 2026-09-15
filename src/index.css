@@ -32,10 +32,11 @@
   --color-ink-muted: #a89a8a;
   --color-ink-faint: #7a6e61;
 
-  /* -- the three game inks ------------------------------------------------ */
+  /* -- the four game inks ------------------------------------------------- */
   --color-imposter:  #e23a5c;
   --color-uno:       #f0a926;
   --color-tank:      #2dc4c9;
+  --color-dice:      #9d7bf0;
 
   /* -- semantic, tuned to survive on a warm ground ------------------------ */
   --color-ok:        #4fb477;  /* ready, connected, shield */
@@ -186,7 +187,9 @@
    Both of these are named here rather than written inline as arbitrary values,
    because both encode the lamp rule and the next pass needs to find them.
    --------------------------------------------------------------------------- */
-.uno-seat-spot {
+/* .seat-spot is the same lamp for any other game's seat rail (Liar's Dice). */
+.uno-seat-spot,
+.seat-spot {
   position: absolute;
   inset: -14px -6px -2px;
   pointer-events: none;

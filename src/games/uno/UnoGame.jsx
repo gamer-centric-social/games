@@ -45,6 +45,7 @@ import {
   playUnoCallSound,
 } from '../../utils/sound'
 import { ChatService } from '../../services/chat/ChatService'
+import { stampChatPacket, toWireMessage } from '../../services/chat/chatRelay'
 import { PeerJsChatTransport } from '../../services/chat/transports/PeerJsChatTransport'
 import { useChat } from '../../hooks/useChat'
 import ChatModal from '../../components/chat/ChatModal'
@@ -704,8 +705,13 @@ export default function UnoGame({
       const playerId = player ? player.id : (data.playerId !== undefined ? data.playerId : g.currentPlayerIndex)
 
       if (data.type === 'CHAT_MESSAGE') {
-        chatTransport.handleIncoming(data)
-        hostNetworkRef.current?.broadcast(data)
+        // Who sent it is the seat this connection holds, not what the packet
+        // claims. Only a message the host actually accepted is relayed, so an
+        // unadmitted peer or a replayed id goes nowhere.
+        const stamped = stampChatPacket(data, player)
+        if (stamped && chatService.handleNetworkPacket(stamped)) {
+          hostNetworkRef.current?.broadcast(stamped)
+        }
       } else if (data.type === 'ACTION_PLAY_CARD') {
         hostProcessPlayCard(playerId, data.cardId, data.chosenColor, data.card)
       } else if (data.type === 'ACTION_DRAW_CARD') {
@@ -725,7 +731,7 @@ export default function UnoGame({
       }
     }
   }, [
-    chatTransport,
+    chatService,
     hostProcessPlayCard,
     hostProcessDrawCard,
     hostProcessPassTurn,
@@ -867,7 +873,7 @@ export default function UnoGame({
           try {
             conn.send({
               type: 'SYNC_CHAT',
-              payload: recentChat,
+              payload: recentChat.map(toWireMessage),
             })
           } catch (e) {
             console.warn('[Host] Failed to send SYNC_CHAT:', e)
@@ -1562,6 +1568,7 @@ export default function UnoGame({
 
   const handleLeaveMpRoom = useCallback(() => {
     chatService.clear()
+    chatTransport.setSendFunction(null)
     closeChat()
     if (disconnectTurnTimerRef.current) {
       clearTimeout(disconnectTurnTimerRef.current)
@@ -1620,7 +1627,7 @@ export default function UnoGame({
     hasShownMyCelebrationRef.current = false
     setFinishedCelebration({ isOpen: false, rank: 1, playerName: 'You', activeRemaining: 2 })
     setScreen('mp_lobby')
-  }, [closeChat, chatService])
+  }, [closeChat, chatService, chatTransport])
 
   // Handle color picker selection
   const handleColorSelected = (color) => {
@@ -1821,8 +1828,8 @@ export default function UnoGame({
             onClose={closeChat}
             messages={chatMessages}
             onSendMessage={handleSendChatMessage}
-            currentUserId={myPlayerId}
             roomCode={mpRoomState.roomCode}
+            tone="uno"
           />
           <ChatToastPreview
             toast={chatActiveToast}
