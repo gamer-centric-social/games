@@ -34,6 +34,13 @@ export function createDiceTable({
   let localSeatId = 0
   const timers = { turn: null, reveal: null, forfeit: null }
   let turnKey = null
+  /** A second listener for accepted changes: the online host's fan-out to clients. */
+  let publisher = null
+
+  function publish() {
+    onChange?.(game, localSeatId)
+    publisher?.(game)
+  }
 
   function clear(name) {
     if (timers[name]) {
@@ -55,7 +62,7 @@ export function createDiceTable({
     if (!result.ok) return result
     schedule()
     if (result.events.length > 0) onEvents?.(result.events, game)
-    onChange?.(game, localSeatId)
+    publish()
     return result
   }
 
@@ -141,7 +148,7 @@ export function createDiceTable({
       localSeatId = seatId
       if (game) {
         schedule()
-        onChange?.(game, localSeatId)
+        publish()
       }
     },
     run,
@@ -152,7 +159,10 @@ export function createDiceTable({
     refresh() {
       if (!game) return
       schedule()
-      onChange?.(game, localSeatId)
+      publish()
+    },
+    setPublisher(fn) {
+      publisher = fn
     },
     destroy() {
       clearAll()

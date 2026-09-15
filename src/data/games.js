@@ -46,6 +46,19 @@ export const GAMES = [
     ink: 'tank',
     tags: ['1v1 duel', '2v2 squad', 'Networked P2P'],
   },
+  {
+    id: 'dice',
+    title: "Liar's Dice",
+    badge: 'Bluffing',
+    tagline: 'Bid on dice you cannot see. Call the liar.',
+    description:
+      'Everyone rolls five dice in secret and bids on what is under all the cups. Raise, call Liar, or call it Exact. Perudo rules, with wild 1s and palifico.',
+    playerCount: '2–6 players',
+    duration: '10–20 min',
+    emoji: '🎲',
+    ink: 'dice',
+    tags: ['Solo vs bots', 'Online multiplayer', 'Perudo rules'],
+  },
 ]
 
 /** Used by the Navbar, which used to keep its own hardcoded copy of these. */
