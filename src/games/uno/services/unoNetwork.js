@@ -9,8 +9,8 @@ import {
 // Prefix namespaces UNO rooms on the shared public PeerJS broker
 const PEER_PREFIX = 'party-arcade-uno-v1-'
 
-/** Keepalive interval (10s) across WebRTC DataConnections to prevent NAT / firewall UDP timeouts */
-const HEARTBEAT_INTERVAL_MS = 10000
+/** Keepalive interval (4s) across WebRTC DataConnections to prevent NAT timeouts and reconcile state */
+const HEARTBEAT_INTERVAL_MS = 4000
 
 /** Format a human-readable room code into a global Peer ID */
 export const formatPeerId = createPeerIdFormatter(PEER_PREFIX)
@@ -46,6 +46,7 @@ export function initHostPeer({
   onClientData,
   onClientLeave,
   onError,
+  getStateVersion = null,
 }) {
   const peerId = formatPeerId(roomCode)
   const peer = new Peer(peerId, {
@@ -56,12 +57,14 @@ export function initHostPeer({
   const connections = new Map() // clientPeerId -> DataConnection
   const pendingPings = new Map() // pingId -> resolve function
 
-  // Periodic heartbeat keepalive (10s) to keep NAT tables and WebRTC connections warm
+  // Periodic heartbeat keepalive (4s) carrying latest stateVersion for client reconciliation
   const heartbeatInterval = setInterval(() => {
+    const version = typeof getStateVersion === 'function' ? getStateVersion() : null
+    const payload = version != null ? { type: 'HEARTBEAT', version } : { type: 'HEARTBEAT' }
     connections.forEach((conn) => {
       if (conn && conn.open) {
         try {
-          conn.send({ type: 'HEARTBEAT' })
+          conn.send(payload)
         } catch {
           // ignore transient send failure; error/close handles dead conns
         }
@@ -319,6 +322,7 @@ export function initClientPeer({
         } catch {
           // ignore
         }
+        if (onData) onData(data)
         return
       }
       if (data?.type === 'HEARTBEAT_ACK') {

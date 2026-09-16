@@ -241,6 +241,11 @@ export default function UnoGame({
   const clientLobbyReconnectAttemptsRef = useRef(0)
   const clientLobbyReconnectTimerRef = useRef(null)
   const handleReconnectMpRef = useRef(null)
+  const handleJoinRoomRef = useRef(null)
+
+  // Monotonic state version counters to reconcile packet drops without manual refresh
+  const hostStateVersionRef = useRef(1)
+  const clientStateVersionRef = useRef(0)
 
   useEffect(() => {
     screenRef.current = screen
@@ -362,10 +367,42 @@ export default function UnoGame({
   // 3. MULTIPLAYER WEBRTC GAME ENGINE
   // ==========================================
 
+  // Sends an authoritative state snapshot to a specific client
+  const hostSendSyncToPlayer = useCallback((g, p, customMessage = null) => {
+    if (!p || p.isHost || !p.peerId || !hostNetworkRef.current) return
+    const sanitizedPlayers = sanitizePlayers(g)
+    const message = customMessage !== null ? customMessage : g.actionMessage || ''
+    hostNetworkRef.current.sendTo(p.peerId, {
+      type: 'SYNC_GAME_STATE',
+      yourPlayerId: p.id,
+      stateVersion: hostStateVersionRef.current,
+      hand: [...handOf(g, p.id)],
+      topCard: g.topCard,
+      activeColor: g.activeColor,
+      currentPlayerIndex: g.currentPlayerIndex,
+      direction: g.direction,
+      drawPileCount: g.drawPile.length,
+      players: sanitizedPlayers,
+      rankings: g.rankings || [],
+      actionMessage: message,
+      unoCalledPlayers: Array.from(g.unoCalledPlayers),
+      hasDrawnThisTurn: g.hasDrawnThisTurn,
+      winner: g.winner,
+      skippedInfo: g.skippedInfo || null,
+      pendingDrawCount: g.pendingDrawCount || 0,
+      pendingStackType: g.pendingStackType || null,
+      stackingEnabled: g.stackingEnabled !== false,
+      catchPenalty: publicCatchPenalty(g),
+    })
+  }, [])
+
   // Broadcasts state to all connected clients & updates host UI
   const hostBroadcastGameState = useCallback((customMessage = null) => {
     const g = hostGameRef.current
     if (!g) return
+
+    hostStateVersionRef.current += 1
+    g.stateVersion = hostStateVersionRef.current
 
     const sanitizedPlayers = sanitizePlayers(g)
     const message = customMessage !== null ? customMessage : g.actionMessage || ''
@@ -404,31 +441,11 @@ export default function UnoGame({
     if (hostNetworkRef.current) {
       g.players.forEach((p) => {
         if (!p.isHost && p.peerId) {
-          hostNetworkRef.current.sendTo(p.peerId, {
-            type: 'SYNC_GAME_STATE',
-            yourPlayerId: p.id,
-            hand: [...handOf(g, p.id)],
-            topCard: g.topCard,
-            activeColor: g.activeColor,
-            currentPlayerIndex: g.currentPlayerIndex,
-            direction: g.direction,
-            drawPileCount: g.drawPile.length,
-            players: sanitizedPlayers,
-            rankings: g.rankings || [],
-            actionMessage: message,
-            unoCalledPlayers: Array.from(g.unoCalledPlayers),
-            hasDrawnThisTurn: g.hasDrawnThisTurn,
-            winner: g.winner,
-            skippedInfo: g.skippedInfo || null,
-            pendingDrawCount: g.pendingDrawCount || 0,
-            pendingStackType: g.pendingStackType || null,
-            stackingEnabled: g.stackingEnabled !== false,
-            catchPenalty: publicCatchPenalty(g),
-          })
+          hostSendSyncToPlayer(g, p, message)
         }
       })
     }
-  }, [])
+  }, [hostSendSyncToPlayer])
 
   // -----------------------------------------------------------------
   // Host action dispatch
@@ -547,6 +564,11 @@ export default function UnoGame({
               type: 'ACTION_REJECTED',
               reason: capitalise(result.reason),
             })
+            // Immediately resync client so any out-of-sync local view corrects itself
+            const originPlayer = g.players.find((p) => p.id === origin.playerId || p.peerId === origin.peerId)
+            if (originPlayer) {
+              hostSendSyncToPlayer(g, originPlayer, capitalise(result.reason))
+            }
           }
         }
         return false
@@ -556,7 +578,7 @@ export default function UnoGame({
       hostBroadcastGameState()
       return true
     },
-    [applyEngineEvents, hostBroadcastGameState]
+    [applyEngineEvents, hostBroadcastGameState, hostSendSyncToPlayer]
   )
 
   // Lets the penalty timeout reach the latest runHostAction without re-arming itself.
@@ -565,23 +587,24 @@ export default function UnoGame({
   }, [runHostAction])
 
   const hostProcessPlayCard = useCallback(
-    (playerId, cardId, chosenColor = null, fallbackCard = null) =>
-      runHostAction((g) => playCard(g, playerId, cardId, chosenColor, fallbackCard)),
+    (playerId, cardId, chosenColor = null, fallbackCard = null, origin = null) =>
+      runHostAction((g) => playCard(g, playerId, cardId, chosenColor, fallbackCard), origin),
     [runHostAction]
   )
 
   const hostProcessDrawCard = useCallback(
-    (playerId) => runHostAction((g) => drawCard(g, playerId)),
+    (playerId, origin = null) => runHostAction((g) => drawCard(g, playerId), origin),
     [runHostAction]
   )
 
   const hostProcessPassTurn = useCallback(
-    (playerId) => runHostAction((g) => passTurn(g, playerId)),
+    (playerId, origin = null) => runHostAction((g) => passTurn(g, playerId), origin),
     [runHostAction]
   )
 
   const hostProcessCallUno = useCallback(
-    (playerId, playerName) => runHostAction((g) => callUno(g, playerId, playerName)),
+    (playerId, playerName, origin = null) =>
+      runHostAction((g) => callUno(g, playerId, playerName), origin),
     [runHostAction]
   )
 
@@ -785,19 +808,24 @@ export default function UnoGame({
         chatTransport.handleIncoming(data)
         hostNetworkRef.current?.broadcast(data)
       } else if (data.type === 'ACTION_PLAY_CARD') {
-        hostProcessPlayCard(playerId, data.cardId, data.chosenColor, data.card)
+        hostProcessPlayCard(playerId, data.cardId, data.chosenColor, data.card, { playerId, peerId: clientPeerId })
       } else if (data.type === 'ACTION_DRAW_CARD') {
-        hostProcessDrawCard(playerId)
+        hostProcessDrawCard(playerId, { playerId, peerId: clientPeerId })
       } else if (data.type === 'ACTION_PASS_TURN') {
-        hostProcessPassTurn(playerId)
+        hostProcessPassTurn(playerId, { playerId, peerId: clientPeerId })
       } else if (data.type === 'ACTION_CALL_UNO') {
-        hostProcessCallUno(playerId, player?.name || data.playerName || 'Player')
+        hostProcessCallUno(playerId, player?.name || data.playerName || 'Player', { playerId, peerId: clientPeerId })
       } else if (data.type === 'ACTION_CATCH_UNO') {
         hostProcessCatchUno(playerId, data.targetPlayerId, { playerId, peerId: clientPeerId })
       } else if (data.type === 'ACTION_SUBMIT_PENALTY_CARD') {
         hostProcessSubmitPenaltyCard(playerId, data.card, data.penaltyId)
       } else if (data.type === 'ACTION_REQUEST_SYNC') {
-        hostBroadcastGameState('Host synchronized game state.')
+        const requestingPlayer = g.players.find((p) => p.id === playerId || p.peerId === clientPeerId)
+        if (requestingPlayer) {
+          hostSendSyncToPlayer(g, requestingPlayer, 'Host synchronized game state.')
+        } else {
+          hostBroadcastGameState('Host synchronized game state.')
+        }
       } else if (data.type === 'ACTION_LEAVE') {
         hostProcessClientLeave(clientPeerId, data.playerId, true)
       }
@@ -812,6 +840,7 @@ export default function UnoGame({
     hostProcessSubmitPenaltyCard,
     hostBroadcastGameState,
     hostProcessClientLeave,
+    hostSendSyncToPlayer,
   ])
 
   // Inform host immediately if tab or window is closing / navigating away
@@ -897,8 +926,10 @@ export default function UnoGame({
     setMyPlayerId(0)
     myPlayerIdRef.current = 0
 
+    hostStateVersionRef.current = 1
     const hostPeer = initHostPeer({
       roomCode: code,
+      getStateVersion: () => hostStateVersionRef.current,
       onOpen: () => {
         setMpRoomState((prev) => ({
           ...prev,
@@ -961,31 +992,7 @@ export default function UnoGame({
         if (result.status === ADMIT.RECONNECTED) {
           // Mid-match: this player needs their own hand back, which only a targeted
           // sync can carry.
-          try {
-            conn.send({
-              type: 'SYNC_GAME_STATE',
-              yourPlayerId: result.player.id,
-              hand: [...handOf(g, result.player.id)],
-              topCard: g.topCard,
-              activeColor: g.activeColor,
-              currentPlayerIndex: g.currentPlayerIndex,
-              direction: g.direction,
-              drawPileCount: g.drawPile.length,
-              players: sanitizePlayers(g),
-              rankings: g.rankings || [],
-              actionMessage: `${result.player.name} reconnected to the game!`,
-              unoCalledPlayers: Array.from(g.unoCalledPlayers),
-              hasDrawnThisTurn: g.hasDrawnThisTurn,
-              winner: g.winner,
-              skippedInfo: g.skippedInfo || null,
-              pendingDrawCount: g.pendingDrawCount || 0,
-              pendingStackType: g.pendingStackType || null,
-              stackingEnabled: g.stackingEnabled !== false,
-              catchPenalty: publicCatchPenalty(g),
-            })
-          } catch (e) {
-            console.error('[Host] Failed to send SYNC_GAME_STATE on reconnect:', e)
-          }
+          hostSendSyncToPlayer(g, result.player, `${result.player.name} reconnected to the game!`)
 
           // They are back, so cancel the auto-pass / sole-survivor countdown.
           if (disconnectTurnTimerRef.current) {
@@ -1072,6 +1079,19 @@ export default function UnoGame({
           chatTransport.handleIncoming(data)
           return
         }
+        if (data.type === 'HEARTBEAT') {
+          if (
+            screenRef.current === 'mp_playing' &&
+            typeof data.version === 'number' &&
+            data.version > clientStateVersionRef.current
+          ) {
+            clientNetworkRef.current?.sendAction({
+              type: 'ACTION_REQUEST_SYNC',
+              playerId: myPlayerIdRef.current,
+            })
+          }
+          return
+        }
         if (data.type === 'ROOM_ERROR') {
           clientLobbyReconnectAttemptsRef.current = 0
           if (clientLobbyReconnectTimerRef.current) {
@@ -1151,6 +1171,11 @@ export default function UnoGame({
             })),
           }))
         } else if (data.type === 'SYNC_GAME_STATE') {
+          if (typeof data.stateVersion === 'number') {
+            clientStateVersionRef.current = Math.max(clientStateVersionRef.current, data.stateVersion)
+          } else {
+            clientStateVersionRef.current += 1
+          }
           setUrlRoomCode(roomCode)
           try {
             sessionStorage.setItem('uno_active_room', roomCode)
@@ -1377,6 +1402,10 @@ export default function UnoGame({
     chatTransport.setSendFunction((data) => clientPeer.sendAction(data))
   }
 
+  useEffect(() => {
+    handleJoinRoomRef.current = handleJoinRoom
+  })
+
   // Host starts the match (Host ALWAYS has the first move: currentPlayerIndex = 0)
   const handleHostStartGame = () => {
     lobbyDisconnectTimersRef.current.forEach((timer) => clearTimeout(timer))
@@ -1403,6 +1432,7 @@ export default function UnoGame({
       isHost: idx === 0,
     }))
 
+    hostStateVersionRef.current = 1
     startMatch(g)
 
     setMpConnectionStatus('connected')
@@ -1598,28 +1628,34 @@ export default function UnoGame({
       }
       clientNetworkRef.current = null
     }
-    handleJoinRoom(myProfileRef.current)
-    // handleJoinRoom is deliberately omitted: it is a plain function re-created every
-    // render, so declaring it would make this callback unstable for no benefit. It
-    // reads nothing that goes stale - the profile comes from a ref.
+    handleJoinRoomRef.current?.(myProfileRef.current)
   }, [mpRoomState.isHost])
 
   useEffect(() => {
     handleReconnectMpRef.current = handleReconnectMp
   }, [handleReconnectMp])
 
-  // When mobile tab or screen returns to foreground, check if client needs immediate reconnect
+  // When mobile tab or screen returns to foreground, check if client needs immediate reconnect or sync
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        if (
-          !mpRoomState.isHost &&
-          (screenRef.current === 'mp_lobby' || screenRef.current === 'mp_playing') &&
-          myProfileRef.current?.roomCode &&
-          clientNetworkRef.current &&
-          !clientNetworkRef.current.isConnected()
-        ) {
-          handleReconnectMp()
+        if (!mpRoomState.isHost && myProfileRef.current?.roomCode) {
+          if (
+            (screenRef.current === 'mp_lobby' || screenRef.current === 'mp_playing') &&
+            clientNetworkRef.current &&
+            !clientNetworkRef.current.isConnected()
+          ) {
+            handleReconnectMp()
+          } else if (
+            screenRef.current === 'mp_playing' &&
+            clientNetworkRef.current?.isConnected()
+          ) {
+            // Refocusing during active game: request sync immediately to catch missed turns
+            clientNetworkRef.current.sendAction({
+              type: 'ACTION_REQUEST_SYNC',
+              playerId: myPlayerIdRef.current,
+            })
+          }
         }
       }
     }
@@ -1694,6 +1730,7 @@ export default function UnoGame({
   }, [])
 
   const handleClientReturnToLobby = useCallback(() => {
+    clientStateVersionRef.current = 0
     clientLobbyReconnectAttemptsRef.current = 0
     if (clientLobbyReconnectTimerRef.current) {
       clearTimeout(clientLobbyReconnectTimerRef.current)
@@ -1749,6 +1786,8 @@ export default function UnoGame({
   }, [mpRoomState.isHost, handleHostReturnAllToLobby, handleClientReturnToLobby])
 
   const handleLeaveMpRoom = useCallback(() => {
+    clientStateVersionRef.current = 0
+    hostStateVersionRef.current = 1
     chatService.clear()
     closeChat()
 
