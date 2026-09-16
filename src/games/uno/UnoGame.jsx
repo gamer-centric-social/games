@@ -38,6 +38,7 @@ import {
   getClientSessionId,
   preloadIceConfig,
 } from './services/unoNetwork'
+import { useWakeLock } from './hooks/useWakeLock'
 import {
   playCardPlaySound,
   playCardDrawSound,
@@ -230,9 +231,32 @@ export default function UnoGame({
   const myProfileRef = useRef({ name: 'Player', avatar: '😎', roomCode: '' })
   const screenRef = useRef(screen)
 
+  // Keep screen awake during multiplayer lobby or match
+  const isMpActive = screen === 'mp_lobby' || screen === 'mp_playing' || screen === 'mp_gameover'
+  useWakeLock(isMpActive)
+
+  // Host tracks disconnected lobby players during 20s grace period
+  const lobbyDisconnectTimersRef = useRef(new Map())
+  // Client tracks automatic reconnect attempts in lobby
+  const clientLobbyReconnectAttemptsRef = useRef(0)
+  const clientLobbyReconnectTimerRef = useRef(null)
+  const handleReconnectMpRef = useRef(null)
+
   useEffect(() => {
     screenRef.current = screen
   }, [screen])
+
+  useEffect(() => {
+    const timers = lobbyDisconnectTimersRef.current
+    return () => {
+      timers.forEach((t) => clearTimeout(t))
+      timers.clear()
+      if (clientLobbyReconnectTimerRef.current) {
+        clearTimeout(clientLobbyReconnectTimerRef.current)
+        clientLobbyReconnectTimerRef.current = null
+      }
+    }
+  }, [])
 
   // Authoritative host master state (immune to React stale closures)
   const hostGameRef = useRef({
@@ -576,7 +600,7 @@ export default function UnoGame({
 
   // Host authoritative handler when a player leaves or disconnects
   const hostProcessClientLeave = useCallback(
-    (clientPeerId, explicitPlayerId = null) => {
+    (clientPeerId, explicitPlayerId = null, isExplicitLeave = false) => {
       const g = hostGameRef.current
       if (!g) return
 
@@ -669,25 +693,79 @@ export default function UnoGame({
         return
       }
 
-      // If in lobby, remove player normally and re-index player IDs cleanly (0 is Host, 1, 2...)
-      const filtered = g.players.filter((p) => p.id !== player.id)
-      const reIndexed = filtered.map((p, idx) => ({
-        ...p,
-        id: idx,
-        isHost: idx === 0,
-      }))
-      g.players = reIndexed
+      // Lobby: clear any existing grace timer for this player
+      const existingTimer = lobbyDisconnectTimersRef.current.get(player.id)
+      if (existingTimer) {
+        clearTimeout(existingTimer)
+        lobbyDisconnectTimersRef.current.delete(player.id)
+      }
+
+      if (isExplicitLeave) {
+        // Explicit departure: remove player immediately and re-index player IDs cleanly (0 is Host, 1, 2...)
+        const filtered = g.players.filter((p) => p.id !== player.id)
+        const reIndexed = filtered.map((p, idx) => ({
+          ...p,
+          id: idx,
+          isHost: idx === 0,
+        }))
+        g.players = reIndexed
+
+        if (hostNetworkRef.current) {
+          hostNetworkRef.current.broadcast({
+            type: 'ROOM_UPDATE',
+            roomCode: g.roomCode,
+            players: reIndexed,
+            maxPlayers: g.maxPlayers || 4,
+            stackingEnabled: g.stackingEnabled !== false,
+          })
+        }
+        setMpRoomState((prev) => ({ ...prev, players: reIndexed }))
+        return
+      }
+
+      // Unintended network disconnect: mark connected: false and grant 20s grace period to reconnect
+      player.connected = false
+      player.peerId = null
 
       if (hostNetworkRef.current) {
         hostNetworkRef.current.broadcast({
           type: 'ROOM_UPDATE',
           roomCode: g.roomCode,
-          players: reIndexed,
+          players: g.players,
           maxPlayers: g.maxPlayers || 4,
           stackingEnabled: g.stackingEnabled !== false,
         })
       }
-      setMpRoomState((prev) => ({ ...prev, players: reIndexed }))
+      setMpRoomState((prev) => ({ ...prev, players: [...g.players] }))
+
+      const graceTimer = setTimeout(() => {
+        lobbyDisconnectTimersRef.current.delete(player.id)
+        const curG = hostGameRef.current
+        if (!curG || isMatchInProgress(curG)) return
+        const curPlayer = curG.players.find((p) => p.id === player.id)
+        if (curPlayer && curPlayer.connected === false) {
+          const filtered = curG.players.filter((p) => p.id !== curPlayer.id)
+          const reIndexed = filtered.map((p, idx) => ({
+            ...p,
+            id: idx,
+            isHost: idx === 0,
+          }))
+          curG.players = reIndexed
+
+          if (hostNetworkRef.current) {
+            hostNetworkRef.current.broadcast({
+              type: 'ROOM_UPDATE',
+              roomCode: curG.roomCode,
+              players: reIndexed,
+              maxPlayers: curG.maxPlayers || 4,
+              stackingEnabled: curG.stackingEnabled !== false,
+            })
+          }
+          setMpRoomState((prev) => ({ ...prev, players: reIndexed }))
+        }
+      }, 20000)
+
+      lobbyDisconnectTimersRef.current.set(player.id, graceTimer)
     },
     [hostBroadcastGameState]
   )
@@ -721,7 +799,7 @@ export default function UnoGame({
       } else if (data.type === 'ACTION_REQUEST_SYNC') {
         hostBroadcastGameState('Host synchronized game state.')
       } else if (data.type === 'ACTION_LEAVE') {
-        hostProcessClientLeave(clientPeerId, data.playerId)
+        hostProcessClientLeave(clientPeerId, data.playerId, true)
       }
     }
   }, [
@@ -847,6 +925,12 @@ export default function UnoGame({
         })
 
         if (result.status === ADMIT.REJECTED) return
+
+        const pendingLobbyTimer = lobbyDisconnectTimersRef.current.get(result.player.id)
+        if (pendingLobbyTimer) {
+          clearTimeout(pendingLobbyTimer)
+          lobbyDisconnectTimersRef.current.delete(result.player.id)
+        }
 
         const welcome = {
           type: 'WELCOME',
@@ -989,6 +1073,11 @@ export default function UnoGame({
           return
         }
         if (data.type === 'ROOM_ERROR') {
+          clientLobbyReconnectAttemptsRef.current = 0
+          if (clientLobbyReconnectTimerRef.current) {
+            clearTimeout(clientLobbyReconnectTimerRef.current)
+            clientLobbyReconnectTimerRef.current = null
+          }
           setMpConnectionStatus('disconnected')
           if (clientNetworkRef.current) {
             try {
@@ -1007,6 +1096,12 @@ export default function UnoGame({
           return
         }
         if (data.type === 'WELCOME') {
+          clientLobbyReconnectAttemptsRef.current = 0
+          if (clientLobbyReconnectTimerRef.current) {
+            clearTimeout(clientLobbyReconnectTimerRef.current)
+            clientLobbyReconnectTimerRef.current = null
+          }
+          setMpConnectionStatus('connected')
           setUrlRoomCode(roomCode)
           try {
             sessionStorage.setItem('uno_active_room', roomCode)
@@ -1212,6 +1307,33 @@ export default function UnoGame({
         setMpConnectionStatus('disconnected')
         if (screenRef.current === 'mp_playing') {
           setMpActionMessage('Connection interrupted. Click Menu or Reconnect to restore state.')
+        } else if (screenRef.current === 'mp_lobby' && myProfileRef.current?.roomCode) {
+          // In lobby waiting room: automatically retry reconnecting within grace period
+          const attempts = clientLobbyReconnectAttemptsRef.current
+          if (attempts < 3) {
+            clientLobbyReconnectAttemptsRef.current = attempts + 1
+            setMpConnectionStatus('reconnecting')
+            setMpRoomState((prev) => ({
+              ...prev,
+              error: '',
+            }))
+            if (clientLobbyReconnectTimerRef.current) {
+              clearTimeout(clientLobbyReconnectTimerRef.current)
+            }
+            clientLobbyReconnectTimerRef.current = setTimeout(() => {
+              handleReconnectMpRef.current?.()
+            }, 1500)
+            return
+          }
+
+          clientLobbyReconnectAttemptsRef.current = 0
+          setMpRoomState((prev) => ({
+            ...prev,
+            isInRoom: false,
+            isConnecting: false,
+            error: prev.error || 'Disconnected from host or room closed.',
+          }))
+          setScreen('mp_lobby')
         } else {
           setMpRoomState((prev) => ({
             ...prev,
@@ -1224,6 +1346,24 @@ export default function UnoGame({
       },
       onError: (err) => {
         setMpConnectionStatus('disconnected')
+        if (
+          screenRef.current === 'mp_lobby' &&
+          myProfileRef.current?.roomCode &&
+          clientLobbyReconnectAttemptsRef.current > 0 &&
+          clientLobbyReconnectAttemptsRef.current < 3
+        ) {
+          clientLobbyReconnectAttemptsRef.current += 1
+          setMpConnectionStatus('reconnecting')
+          if (clientLobbyReconnectTimerRef.current) {
+            clearTimeout(clientLobbyReconnectTimerRef.current)
+          }
+          clientLobbyReconnectTimerRef.current = setTimeout(() => {
+            handleReconnectMpRef.current?.()
+          }, 2000)
+          return
+        }
+
+        clientLobbyReconnectAttemptsRef.current = 0
         setMpRoomState((prev) => ({
           ...prev,
           isConnecting: false,
@@ -1239,6 +1379,9 @@ export default function UnoGame({
 
   // Host starts the match (Host ALWAYS has the first move: currentPlayerIndex = 0)
   const handleHostStartGame = () => {
+    lobbyDisconnectTimersRef.current.forEach((timer) => clearTimeout(timer))
+    lobbyDisconnectTimersRef.current.clear()
+
     if (disconnectTurnTimerRef.current) {
       clearTimeout(disconnectTurnTimerRef.current)
       disconnectTurnTimerRef.current = null
@@ -1250,6 +1393,16 @@ export default function UnoGame({
 
     const g = hostGameRef.current
     if (!g) return
+
+    // Cleanly purge any players who disconnected and did not reconnect before start
+    const connectedPlayers = g.players.filter((p) => p.connected !== false)
+    if (connectedPlayers.length < 2) return
+    g.players = connectedPlayers.map((p, idx) => ({
+      ...p,
+      id: idx,
+      isHost: idx === 0,
+    }))
+
     startMatch(g)
 
     setMpConnectionStatus('connected')
@@ -1451,6 +1604,35 @@ export default function UnoGame({
     // reads nothing that goes stale - the profile comes from a ref.
   }, [mpRoomState.isHost])
 
+  useEffect(() => {
+    handleReconnectMpRef.current = handleReconnectMp
+  }, [handleReconnectMp])
+
+  // When mobile tab or screen returns to foreground, check if client needs immediate reconnect
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (
+          !mpRoomState.isHost &&
+          (screenRef.current === 'mp_lobby' || screenRef.current === 'mp_playing') &&
+          myProfileRef.current?.roomCode &&
+          clientNetworkRef.current &&
+          !clientNetworkRef.current.isConnected()
+        ) {
+          handleReconnectMp()
+        }
+      }
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }
+  }, [mpRoomState.isHost, handleReconnectMp])
+
   const handleSyncGameStateMp = useCallback(() => {
     if (hostNetworkRef.current || mpRoomState.isHost) {
       setMpConnectionStatus('connected')
@@ -1512,6 +1694,12 @@ export default function UnoGame({
   }, [])
 
   const handleClientReturnToLobby = useCallback(() => {
+    clientLobbyReconnectAttemptsRef.current = 0
+    if (clientLobbyReconnectTimerRef.current) {
+      clearTimeout(clientLobbyReconnectTimerRef.current)
+      clientLobbyReconnectTimerRef.current = null
+    }
+
     if (clientNetworkRef.current) {
       try {
         clientNetworkRef.current.sendAction({
@@ -1563,6 +1751,15 @@ export default function UnoGame({
   const handleLeaveMpRoom = useCallback(() => {
     chatService.clear()
     closeChat()
+
+    clientLobbyReconnectAttemptsRef.current = 0
+    if (clientLobbyReconnectTimerRef.current) {
+      clearTimeout(clientLobbyReconnectTimerRef.current)
+      clientLobbyReconnectTimerRef.current = null
+    }
+    lobbyDisconnectTimersRef.current.forEach((t) => clearTimeout(t))
+    lobbyDisconnectTimersRef.current.clear()
+
     if (disconnectTurnTimerRef.current) {
       clearTimeout(disconnectTurnTimerRef.current)
       disconnectTurnTimerRef.current = null
@@ -1714,6 +1911,7 @@ export default function UnoGame({
           onLeaveRoom={handleLeaveMpRoom}
           onBackToModeSelect={() => setScreen('mode_select')}
           roomState={{ ...mpRoomState, stackingEnabled: mpStackingEnabled }}
+          connectionStatus={mpConnectionStatus}
           onOpenChat={openChat}
           unreadChatCount={unreadChatCount}
         />

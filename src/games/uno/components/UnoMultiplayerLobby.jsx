@@ -12,6 +12,7 @@ export default function UnoMultiplayerLobby({
   onLeaveRoom,
   onBackToModeSelect,
   roomState, // { isInRoom, isHost, roomCode, players, maxPlayers, isConnecting, error }
+  connectionStatus = 'connected',
   onOpenChat,
   unreadChatCount = 0,
 }) {
@@ -19,6 +20,7 @@ export default function UnoMultiplayerLobby({
     return (
       <UnoRoomWaiting
         roomState={roomState}
+        connectionStatus={connectionStatus}
         onStartGame={onStartGame}
         onLeaveRoom={onLeaveRoom}
         onOpenChat={onOpenChat}

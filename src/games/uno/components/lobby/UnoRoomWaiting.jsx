@@ -13,6 +13,7 @@ import PlayerRow, { Badge, Dot } from '../../../../components/ui/PlayerRow'
 /** The waiting room, once you are connected and before the host deals. */
 export default function UnoRoomWaiting({
   roomState,
+  connectionStatus = 'connected',
   onStartGame,
   onLeaveRoom,
   onOpenChat,
@@ -21,7 +22,8 @@ export default function UnoRoomWaiting({
   const isHost = roomState.isHost
   const players = roomState.players || []
   const maxCap = roomState.maxPlayers || 4
-  const canStart = isHost && players.length >= 2
+  const connectedCount = players.filter((p) => p.connected !== false).length
+  const canStart = isHost && connectedCount >= 2
   const stacking = roomState.stackingEnabled !== false
 
   const { copied, copy: copyCode } = useCopyFeedback()
@@ -43,6 +45,13 @@ export default function UnoRoomWaiting({
         subtitle="Read out the code, or send the link."
         className="pb-5"
       />
+
+      {connectionStatus === 'reconnecting' && (
+        <div className="mb-3 w-full py-2.5 px-3.5 rounded-object bg-well border border-edge shadow-sink text-center text-mini text-turn flex items-center justify-center gap-2">
+          <Dot tone="turn" className="w-2 h-2 animate-pulse" />
+          Connection interrupted. Reconnecting to host…
+        </div>
+      )}
 
       {/* The code is the thing you say out loud, so it is the largest thing here. */}
       <Surface level={2} className="p-5 text-center space-y-4">
@@ -111,10 +120,17 @@ export default function UnoRoomWaiting({
                 </>
               }
               trailing={
-                <span className="flex items-center gap-1.5 text-nano font-semibold text-ok">
-                  <Dot tone="ok" className="w-1.5 h-1.5" />
-                  Ready
-                </span>
+                p.connected === false ? (
+                  <span className="flex items-center gap-1.5 text-nano font-semibold text-turn">
+                    <Dot tone="turn" className="w-1.5 h-1.5 animate-pulse" />
+                    Reconnecting
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-nano font-semibold text-ok">
+                    <Dot tone="ok" className="w-1.5 h-1.5" />
+                    Ready
+                  </span>
+                )
               }
             />
           ))}
@@ -142,7 +158,11 @@ export default function UnoRoomWaiting({
             }}
           >
             <Play className="w-4 h-4 fill-current" />
-            {canStart ? 'Deal the cards' : 'Waiting for one more player'}
+            {canStart
+              ? 'Deal the cards'
+              : connectedCount < 2
+                ? 'Waiting for one more player'
+                : 'Waiting for players to reconnect'}
           </Button>
         ) : (
           <div className="w-full py-3.5 px-4 rounded-object bg-well border border-edge shadow-sink text-center text-mini text-ink-muted flex items-center justify-center gap-2">

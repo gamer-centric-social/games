@@ -9,6 +9,9 @@ import {
 // Prefix namespaces UNO rooms on the shared public PeerJS broker
 const PEER_PREFIX = 'party-arcade-uno-v1-'
 
+/** Keepalive interval (10s) across WebRTC DataConnections to prevent NAT / firewall UDP timeouts */
+const HEARTBEAT_INTERVAL_MS = 10000
+
 /** Format a human-readable room code into a global Peer ID */
 export const formatPeerId = createPeerIdFormatter(PEER_PREFIX)
 
@@ -53,6 +56,19 @@ export function initHostPeer({
   const connections = new Map() // clientPeerId -> DataConnection
   const pendingPings = new Map() // pingId -> resolve function
 
+  // Periodic heartbeat keepalive (10s) to keep NAT tables and WebRTC connections warm
+  const heartbeatInterval = setInterval(() => {
+    connections.forEach((conn) => {
+      if (conn && conn.open) {
+        try {
+          conn.send({ type: 'HEARTBEAT' })
+        } catch {
+          // ignore transient send failure; error/close handles dead conns
+        }
+      }
+    })
+  }, HEARTBEAT_INTERVAL_MS)
+
   peer.on('open', (id) => {
     if (onOpen) onOpen(id, roomCode)
   })
@@ -66,6 +82,25 @@ export function initHostPeer({
     })
 
     conn.on('data', (data) => {
+      if (data?.type === 'HEARTBEAT') {
+        try {
+          conn.send({ type: 'HEARTBEAT_ACK' })
+        } catch {
+          // ignore
+        }
+        return
+      }
+      if (data?.type === 'HEARTBEAT_ACK') {
+        return
+      }
+      if (data?.type === 'PING') {
+        try {
+          conn.send({ type: 'PONG', pingId: data.pingId })
+        } catch {
+          // ignore
+        }
+        return
+      }
       if (data?.type === 'PONG') {
         const resolver = pendingPings.get(data.pingId)
         if (resolver) {
@@ -183,6 +218,7 @@ export function initHostPeer({
       }
     },
     destroy: () => {
+      clearInterval(heartbeatInterval)
       pendingPings.forEach((resolve) => resolve(false))
       pendingPings.clear()
       connections.forEach((conn) => {
@@ -220,6 +256,7 @@ export function initClientPeer({
 
   let hostConn = null
   let connectTimeout = null
+  let clientHeartbeatInterval = null
 
   peer.on('open', () => {
     const hostPeerId = formatPeerId(roomCode)
@@ -246,6 +283,18 @@ export function initClientPeer({
         clearTimeout(connectTimeout)
         connectTimeout = null
       }
+
+      // Start client heartbeat keepalive (10s)
+      clientHeartbeatInterval = setInterval(() => {
+        if (hostConn && hostConn.open) {
+          try {
+            hostConn.send({ type: 'HEARTBEAT' })
+          } catch {
+            // ignore
+          }
+        }
+      }, HEARTBEAT_INTERVAL_MS)
+
       try {
         hostConn.send({
           type: 'JOIN',
@@ -264,6 +313,17 @@ export function initClientPeer({
     hostConn.on('open', handleOpen)
 
     hostConn.on('data', (data) => {
+      if (data?.type === 'HEARTBEAT') {
+        try {
+          hostConn.send({ type: 'HEARTBEAT_ACK' })
+        } catch {
+          // ignore
+        }
+        return
+      }
+      if (data?.type === 'HEARTBEAT_ACK') {
+        return
+      }
       if (data?.type === 'PING') {
         try {
           hostConn.send({ type: 'PONG', pingId: data.pingId })
@@ -276,6 +336,10 @@ export function initClientPeer({
     })
 
     hostConn.on('close', () => {
+      if (clientHeartbeatInterval) {
+        clearInterval(clientHeartbeatInterval)
+        clientHeartbeatInterval = null
+      }
       if (connectTimeout) {
         clearTimeout(connectTimeout)
         connectTimeout = null
@@ -284,6 +348,10 @@ export function initClientPeer({
     })
 
     hostConn.on('error', (err) => {
+      if (clientHeartbeatInterval) {
+        clearInterval(clientHeartbeatInterval)
+        clientHeartbeatInterval = null
+      }
       if (connectTimeout) {
         clearTimeout(connectTimeout)
         connectTimeout = null
@@ -291,6 +359,17 @@ export function initClientPeer({
       console.error('[Client] hostConn error:', err)
       if (onError) onError(err)
     })
+  })
+
+  peer.on('disconnected', () => {
+    console.warn('[Client] Peer disconnected from signaling server. Attempting automatic reconnect...')
+    try {
+      if (!peer.destroyed) {
+        peer.reconnect()
+      }
+    } catch (e) {
+      console.warn('[Client] Peer reconnect failed:', e)
+    }
   })
 
   peer.on('error', (err) => {
@@ -319,6 +398,10 @@ export function initClientPeer({
       }
     },
     destroy: () => {
+      if (clientHeartbeatInterval) {
+        clearInterval(clientHeartbeatInterval)
+        clientHeartbeatInterval = null
+      }
       if (connectTimeout) {
         clearTimeout(connectTimeout)
         connectTimeout = null
