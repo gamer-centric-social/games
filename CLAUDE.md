@@ -1,9 +1,11 @@
 # CLAUDE.md
 
-Party Arcade — a mobile-first React SPA hosting three party games: **Imposter**
-(pass-and-play), **UNO** (solo-vs-AI and P2P multiplayer), and **Tank Arena**
-(real-time P2P). Everything runs in the browser; multiplayer is peer-to-peer over
-WebRTC with no game server.
+Party Arcade — a mobile-first React SPA hosting five party games: **Imposter**
+(pass-and-play), **UNO** (solo-vs-AI and P2P multiplayer), **Tank Arena**
+(real-time P2P), **Liar's Dice** (Perudo, solo-vs-bots and P2P multiplayer) and
+**Bounce** (a one-tap colour-gated climb through rooms of turning gates, time trial and P2P race).
+Everything runs in the browser; multiplayer is peer-to-peer over WebRTC with no game
+server.
 
 ## Commands
 
@@ -42,8 +44,13 @@ src/
   components/             hub UI (Navbar, GameHub). Nothing game-specific.
   components/ui/          the design system: Button, Modal, Screen, Pill, inputs, roster
   services/               cross-game infrastructure (peerConfig.js: ICE/TURN + room codes + share links)
-  hooks/                  HUB-ONLY shared React hooks (useCopyFeedback)
-  utils/sound.js          Web Audio synth shared by all three games
+  services/room/          shared P2P rooms: roomNetwork (PeerJS host/client), roomHandshake
+                          (admission + seat reclaim), roomChat (the host-stamped chat relay)
+  services/chat/          room chat: ChatService, transport, chatRelay
+  components/room/        shared lobby screens (JoinCreate, RoomWaiting), coloured by `tone`
+  hooks/                  HUB-ONLY shared React hooks (useCopyFeedback, useChat, useRoomChat)
+  utils/sound.js          Web Audio synth shared by all five games
+  utils/rng.js            seeded + crypto randomness, injected into every engine
   data/games.js           hub card metadata
   games/<game>/
     <Game>.jsx            composition + screen routing only
@@ -61,7 +68,7 @@ Rules of thumb:
   not belong in `src/components/`, `src/data/` or `src/utils/`.
 - `components/ui/` is the exception, and the only one: it holds cross-game *presentation*
   primitives that know nothing about any game. Per-game colour reaches them as a `tone`
-  prop (`imposter` / `uno` / `tank`), never as a literal class string. Build a screen out
+  prop (`imposter` / `uno` / `tank` / `dice`), never as a literal class string. Build a screen out
   of these rather than writing a new class string — the app previously had 856 `className`
   attributes spelling out 576 distinct strings, which is how eight different modal panels
   and three incompatible primary buttons happened.
@@ -70,6 +77,8 @@ Rules of thumb:
   into sound, broadcasts, modals and timers. That is what keeps them unit-testable.
   - UNO: `(game, ...args) => { ok, reason?, events }`, mutating `game` in place.
   - Tank: `stepWorld(world, inputs) => { world, events }`, returning a new world.
+  - Liar's Dice: the UNO shape, `(game, ...args) => { ok, reason?, events }`, with
+    randomness injected (`rng`) so tests roll fixed dice.
 - When a file passes ~400 lines, that is the signal to split it, not a target to beat.
 
 ## Design system
@@ -88,14 +97,17 @@ top of the viewport, and every surface obeys it**:
 - the lamp itself is `.table-lamp` on the app root. It does not move and does not animate.
 
 The shell is deliberately almost colourless. **The only saturated colour in the app comes
-from the three game inks** (`imposter` / `uno` / `tank`) plus the semantic `ok` / `danger`
-/ `turn`. No gradients — the red-to-amber-to-emerald and cyan-to-blue buttons the three
+from the five game inks** (`imposter` / `uno` / `tank` / `dice` / `bounce`) plus the semantic
+`ok` / `danger` / `turn`. No gradients — the red-to-amber-to-emerald and cyan-to-blue buttons the three
 games each had were the most generic thing in the repo.
 
 Three typefaces, three jobs: `font-display` (Bricolage Grotesque, **one weight**) for
 headings and game names, `font-sans` (Hanken Grotesk) for everything else, `font-mono`
 (DM Mono) for room codes, timers, counts, HP and scores. `font-black` and `font-extrabold`
 are not used. Radii are `rounded-well` / `-object` / `-slab`, and nothing else.
+
+Two games spend saturated colour on their *material* rather than their ink, and both do
+it for the same reason: the colours **are the rules**.
 
 UNO extends the lamp rule by exactly one step, and it is the only game that extends it:
 **the light over the board burns the colour of the card in play** (`.uno-table-light`,
@@ -107,6 +119,36 @@ place saturated colour belongs to a game's *material* rather than its ink. Keep 
 The light is never the only signal. Red/green is UNO's classic accessibility failure and
 an ambient colour makes it worse, so the live colour is always also named in words beside
 the discard, and every card keeps its numeral plus two corner indices.
+
+Bounce is the second, and its four ball colours (`--color-bounce-blue` / `-pink` / `-turq`
+/ `-gold`, mirrored as hexes in `COLOR_CONFIG`) are the harder case: you cannot climb
+without telling them apart, and misreading one does not merely confuse you, it costs you
+the race. So **every colour also carries a glyph** — disc / hollow ring / chevron / diamond,
+one set of paths in `utils/colorGlyphs.js` shared by the canvas (through `Path2D`) and the
+DOM (as `<svg>`), because two copies would drift. The climb is playable in greyscale. The
+colour being held is also named in words in the HUD and announced through an `aria-live`
+region, the same job `UnoStatusLine` does.
+
+Bounce does **not** extend the lamp the way `.uno-table-light` does — that stays UNO's one
+move. What it does instead is make the lamp the finish: **the shaft brightens as you
+climb**, on a gradient keyed to world height rather than screen position, so it is
+continuous as the camera scrolls and never resets. Progress reads as luminance, the light
+is fixed at the top of the course and does not animate, and both ends of the ramp lie
+between tokens the palette already has, so no second ground enters the design.
+
+A **chamber** is the one place that ramp does not reach, and it extends the rule rather
+than breaking it: the wall occludes the shaft, the interior is a pocket of dark, and the
+cycling core inside is the only light source in the room. One light source per space, still
+— and the colour you are about to carry out is literally what you are reading by. It needs
+no new palette value, and it makes a chamber unmistakable from three hundred units below.
+
+Two other marks in `render/` encode something true rather than decorating. A gate's
+**rhythm mark** says how it moves, because a ring, a pendulum and a ratchet are identical
+in a still frame and you would otherwise only learn which is which by being caught out:
+teeth for the ratchet, a pivot for the pendulum, nothing for the plain ring, since marking
+everything marks nothing. And the core is drawn as an **annulus, not a disc** — a filled
+core is exactly the size and shape of a ball and paints it its own colour, which left the
+two indistinguishable at the moment you most need to see where you are.
 
 Whose turn it is is also said only in light and geometry, three times over: `.uno-seat-spot`
 puts the lamp on the active seat (there are two seat states, lit or in shadow -- a third
@@ -141,14 +183,128 @@ Never let a client mutate game state locally and assume it sticks. Optimistic lo
 updates are fine — the host's next broadcast is the truth. Never trust a value a client
 sent as game-affecting input without re-deriving or validating it host-side.
 
-The host is also a player: `playerId` 0 in UNO, slot `p1` (blue) in Tank.
+Room chat obeys the same rule. The host rebuilds every client `CHAT_MESSAGE` with
+`stampChatPacket` (`services/chat/chatRelay.js`), taking the sender from the seat the
+connection holds, and relays only what its own `ChatService` accepted. Whether a message is
+yours is `msg.isOwn`, set where it was typed -- never `senderId`, because lobby seat ids
+are renumbered when someone leaves.
+
+Who a client is comes only from its connection. Each of these was once an exploit:
+
+- the acting seat is the one whose `peerId` is the connection -- never a `playerId` in
+  the packet, and a connection with no seat can do nothing;
+- a connection holds at most one seat (`admitPlayer` refuses a second JOIN under another
+  name);
+- rosters sent to clients carry no `peerId` or `sessionId` -- a session id walks straight
+  back into its seat, skipping the liveness probe;
+- anything the room says goes through `broadcastToSeats` (`services/room/roomChat.js`),
+  not the network's `broadcast`, which also reaches connections that never joined.
+
+The host is also a player: `playerId` 0 in UNO and Liar's Dice, slot `p1` (blue) in Tank.
+
+**Liar's Dice is the reference for new networked games.** It is built on
+`services/room/` rather than its own copy of the PeerJS plumbing (UNO and Tank still
+have theirs; UNO migrates later, as its own two-device-tested change). Its shape:
+
+- one pure engine, driven by one controller, `games/dice/services/diceTable.js`, which
+  owns every timer (bot turns, the reveal hold, covering a dropped player, the forfeit).
+  Solo runs it locally; the online host runs the same one. It is plain JS, so it is
+  tested with fake timers -- the gap UNO has in `useUnoAiGame.js` does not exist here.
+- the only thing a client ever receives is `snapshotFor(game, theirSeatId)`: their own
+  dice, everyone else as counts, every cup only during the reveal. Lobby and match
+  alike, so a client has one code path.
+- `JOIN` carries a protocol version the host checks, so a stale client is refused with
+  a message instead of desyncing.
 
 Host state deliberately lives in a `useRef`, not `useState`, so it is immune to stale
 closures inside network callbacks and timers. Keep it that way.
 
+**Bounce is the one game where the client simulates, and the reason is latency.** Under the
+intent-and-broadcast model above, every tap would pay a network round trip, and 80ms
+between tapping and the ball rising is the difference between clearing a gate and being
+thrown back a checkpoint. The escape is that in Bounce **balls never interact**: nobody
+blocks anybody, so nobody needs to simulate anybody else.
+
+```
+Host  --- RACE_START { seed } ------------------->  Client builds the identical course
+Host  <-- ACTION_PROGRESS { y, checkpoint } ------  and simulates only its own ball, 5x/s
+Host  --- SYNC_RACE_STATE { standings } --------->
+```
+
+The host still owns everything that decides the game: it picks the seed (clients never
+do), ranks the field, and declares the result. A reported height is checked against the
+physics in `engine/raceState.js` before it is believed — you cannot rise faster than the
+tap impulse, cannot beat the course's theoretical minimum time, and cannot claim the line
+without a live climb behind you. Finish order is the host's own clock, from `RACE_START`
+sent to `ACTION_FINISH` received, so no clock is shared between devices and first past the
+post is literally that.
+
+Be clear about what this buys: it **bounds** cheating rather than eliminating it. A
+determined client could still climb at exactly the legal maximum. Closing that means
+simulating every ball host-side, which is the option that makes the game feel broken for
+everyone. For a party game among friends the bound is the right trade — it is written down
+in `raceState.js` too, so nobody later mistakes it for an oversight. **Do not copy this
+model into a game where players can affect each other**; there, the host must simulate.
+
+Bounce's controller, `games/bounce/services/bounceTable.js`, is driven by `advance(nowMs)`
+rather than owning a timer, so a test runs a whole race in a plain loop with no fake clock
+at all. `requestAnimationFrame` lives in exactly one place, `hooks/useBounceLoop.js`, and
+the step is a fixed 1/120s accumulator — a 120Hz phone and a 60Hz phone must play the same
+game, which Tank's `setInterval(32)` does not guarantee.
+
+**Because every device builds the course itself, `PROTOCOL_VERSION` is load-bearing in a
+way it is not elsewhere.** Change anything a seed feeds — `engine/gates.js`,
+`engine/segments.js`, `engine/courseGen.js`, or any constant they read — and an old client
+given a new seed builds a course nobody else has, then reports heights against geometry
+that exists for no one but itself. It does not error; it desyncs in silence. Bump the
+version in the same commit, every time, and bump `BEST_TIME_KEY` too if the course height
+moved, since a record set on a different climb is not a record.
+
+### Bounce's three engine modules
+
+- **`engine/gates.js`** is the registry, and the reason it exists is that *both the engine
+  and the renderer read it*. A gate is one idea — a height, and a function from time to
+  the colour covering the crossing point — and a ring, pendulum, ratchet, slider and
+  shutter are five spellings of that function. A gate drawn a few degrees from where the
+  engine will test it is the worst bug available here: you would lose races you had played
+  correctly and no screenshot would show why. Two implementations drift, so there is one:
+  `arcsAt` for the circular kinds, `bandsAt` for the sliding ones, and `gates.test.js`
+  checks each against `colorAtCrossing` rather than against a hand-written expectation.
+  Same argument as `utils/colorGlyphs.js`.
+
+  **This is not hypothetical — it shipped.** A sliding gate's strip is laid out from the
+  shaft's *left wall*, but the ball is pinned to the shaft's *centre line*, 300 units
+  along it, which is where the notch is drawn. The engine read the strip at the wall. As
+  300 is not a multiple of the 220-unit segment, the colour tested sat one or two segments
+  left of the one under your ball at **every** strip position, so a slider could never be
+  passed on the colour you could see. It survived from `3122d07` until someone played it,
+  because **every test in this repo consults the engine for truth** — including the
+  autopilot, which probed `stepRun` and cheerfully played the wrong answer. The one guard
+  against the whole class was the drift test, and it opened with `if (!element.radius)
+  continue`, which skipped precisely the two kinds that had drifted. Exempting a kind from
+  that test is how this bug gets back in. `BALL_X` exists so the crossing point is a named
+  thing rather than an implied zero.
+- **`engine/segments.js`** holds the rooms. A course is a stack of them — gauntlet, sweep,
+  carousel, ratchet run, chamber, breather — each with its own character and its own
+  height, and `courseGen.js` only assembles. Checkpoints land on the seams, which is why
+  a respawn never drops you inside a gauntlet or inside a chamber, and why the old
+  nudge-it-off-the-line hack is gone. Pacing is a rule rather than a hope: never three
+  demanding rooms running, never two breathers or two chambers adjacent, never the same
+  room three times over.
+- **`engine/bounceEngine.js`** gained one piece of state, `run.inside`, and with it the
+  chamber: a room you are held in rather than a gate you pass. Its lip is crossed once and
+  is not gated at all; its ceiling is the only way out and is a fault if it is showing the
+  wrong colour; its core paints you continuously while you overlap it. The core is the one
+  **overlap** test on the course and that is only safe because it is thick — a substep at
+  terminal velocity covers about twelve units and the core band is over a hundred. Gate
+  outlines are not thick, which is why they stay plane crossings. A chamber is solid in
+  **both** directions: drop back through the ceiling you just left and you are in it again,
+  on the same floor, because otherwise a floor you rested on a moment ago would have
+  quietly become air.
+
 ## Before claiming a change works
 
-Run `npm test` (319 tests) and `npm run lint`. The engine tests exist because the UNO
+Run `npm test` (694 tests) and `npm run lint`. The engine tests exist because the UNO
 rules and the Tank collision maths are easy to break silently.
 
 Where the coverage is:
@@ -156,8 +312,8 @@ Where the coverage is:
 | Module | Tests |
 |---|---|
 | `uno/utils/deck.js` | 43 |
-| `uno/engine/hostEngine.js` | 72 |
-| `uno/services/unoHandshake.js` | 20 |
+| `uno/engine/hostEngine.js` | 73 |
+| `uno/services/unoHandshake.js` | 24 |
 | `uno/utils/unoAi.js` | 23 |
 | `uno/utils/turnOrder.js` | 16 |
 | `uno/utils/drawFlightGeometry.js` | 13 |
@@ -167,6 +323,23 @@ Where the coverage is:
 | `tank/utils/arenaGeometry.js` | 14 |
 | `tank/utils/joystickMath.js` | 12 |
 | `tank/utils/tankHud.js` | 3 |
+| `services/chat/ChatService.js` + `chatTypes.js` | 14 |
+| `services/chat/chatRelay.js` | 11 |
+| `services/room/roomHandshake.js` | 24 |
+| `services/room/roomChat.js` | 8 |
+| `dice/engine/bidRules.js` | 22 |
+| `dice/engine/diceEngine.js` | 32 |
+| `dice/services/diceTable.js` | 11 |
+| `dice/utils/narration.js` | 12 |
+| `dice/utils/diceAi.js` | 5 |
+| `utils/rng.js` | 3 |
+| `bounce/engine/gates.js` | 42 |
+| `bounce/engine/segments.js` | 56 |
+| `bounce/engine/courseGen.js` | 29 |
+| `bounce/engine/bounceEngine.js` | 29 |
+| `bounce/engine/raceState.js` | 32 |
+| `bounce/services/bounceTable.js` | 27 |
+| `bounce/services/bounceHost.js` | 13 |
 
 The notable gap is `uno/hooks/useUnoAiGame.js` — solo-vs-AI holds its state in React,
 so it cannot be tested without a renderer. Treat changes there as unverified and play a
@@ -175,6 +348,49 @@ solo game through.
 For rules changes, the invariant to check by hand is that a UNO deck stays whole:
 `sum(all hands) + drawPile + discardPile === 108` (216 with 6+ players, which uses two
 decks).
+
+For Liar's Dice the invariant is that a resolved challenge moves the total dice by exactly
+-1, or +1 (a successful Exact below five dice), or 0 (a successful Exact at five), and
+every seat stays within 0..5. `diceEngine.test.js` plays seeded games to the end against it.
+
+Bounce has five invariants, and each has a test that would be easy to lose:
+
+- a run's `checkpointIndex` never decreases;
+- an accepted height never exceeds the previous one by more than `MAX_CLIMB_RATE × dt`,
+  and never exceeds `MAX_CLIMB_RATE × (time since the flag dropped)` at all — the second
+  bound is what stops per-interval slack compounding into a fifth of the course;
+- **every gate crossing is evaluated exactly once** — never zero times, which is
+  tunnelling, and never twice, which is a double penalty. At terminal velocity a
+  substep covers far more ground than a ring outline is thick, so crossings are
+  resolved as plane crossings rather than containment tests. `bounceEngine.test.js`
+  sweeps a course at terminal velocity and counts. A **chamber ceiling** is the one
+  exception and it is deliberate: it is evaluated on every upward approach, because you
+  may rise at it, think better of it, and drop back as often as you like;
+- **no gate ever offers a colour for less time than a person can react to.** Difficulty
+  is a narrower window; it is never a coin flip. `gates.test.js` proves `windowSeconds`
+  never over-reports what a gate really gives, and `courseGen.test.js` holds every gate
+  on every seed to `MIN_GATE_WINDOW_SECONDS` — together those two are a claim about the
+  real windows and not just about the arithmetic. The paired trap is an **oscillating**
+  gate that does not sweep its whole cycle: a pendulum swinging less than half a turn, or
+  a shutter sliding less than half a pattern, leaves a colour that never arrives at all,
+  and a ball holding it waits at that gate forever;
+- **a chamber's clear interior travel exceeds two tap apexes.** Hitting the ceiling on the
+  wrong colour costs you the room, which is only fair because you cannot arrive there
+  without deciding to: no single tap, from the floor or from the core, gets close. Note
+  that the discrete apex is slightly *under* `TAP_APEX` — stepping at a fixed dt lands
+  about half a step short — so the bound holds with room to spare, and `bounceEngine`
+  asserts a tap never overshoots the figure the constant assumes.
+
+`bounceTable.test.js` also climbs whole courses with a lookahead autopilot, which is
+the standing check that a generated course is never a dead end. It has to *play* a
+chamber rather than batter it: a ring is a one-tap decision the ordinary lookahead
+settles, but a chamber takes three taps, each harmless alone while the three together
+commit you. So it probes the whole ascent and re-reads the room every frame, aborting
+back to the floor rather than committing to a plan drawn a substep at a time — the table
+decides once a frame and queues the tap, so any such plan drifts. A climber that simply
+hammered upward would also reach the line eventually, by faulting until the dice came
+good, and then that file would prove much less than it claims; it is asserted to escape
+every chamber it enters, first time.
 
 For anything touching networking or controls, test on two real devices. A dev-server
 tab talking to another tab on the same machine does not exercise ICE, NAT or touch

@@ -3,6 +3,7 @@ import {
   createChatMessage,
   sanitizeChatMessage,
 } from './chatTypes'
+import { toWireMessage } from './chatRelay'
 
 /**
  * ChatService
@@ -97,11 +98,14 @@ export class ChatService {
     const envelope = createChatMessage({ senderId, senderName, avatar, text })
     if (!envelope) return null
 
-    this.addMessageToBuffer(envelope)
+    // "Is this mine?" is answered here, where the message was typed -- not by
+    // comparing senderId, because seat ids are renumbered when someone leaves
+    // the lobby and a departed player's messages would start rendering as yours.
+    this.addMessageToBuffer({ ...envelope, isOwn: true })
 
     if (this.transport && typeof this.transport.send === 'function') {
       try {
-        this.transport.send(envelope)
+        this.transport.send(toWireMessage(envelope))
       } catch (err) {
         console.error('[ChatService] Error sending envelope via transport:', err)
       }
@@ -113,40 +117,53 @@ export class ChatService {
 
   /**
    * Handle an incoming network packet from the transport.
+   *
+   * Returns true when it added at least one new message. The host relies on
+   * this: it only rebroadcasts what it accepted, so a replayed id goes nowhere.
+   *
    * @param {Object} packet
+   * @returns {boolean}
    */
   handleNetworkPacket(packet) {
-    if (!packet || typeof packet !== 'object') return
+    if (!packet || typeof packet !== 'object') return false
 
     if (packet.type === 'CHAT_MESSAGE' && packet.payload) {
-      const msg = packet.payload
-      if (!msg.id || this.seenIds.has(msg.id)) return
-
-      const cleanText = sanitizeChatMessage(msg.text)
-      if (!cleanText) return
-
-      const safeEnvelope = {
-        ...msg,
-        text: cleanText,
-      }
+      const safeEnvelope = this.acceptFromNetwork(packet.payload)
+      if (!safeEnvelope) return false
 
       this.addMessageToBuffer(safeEnvelope)
       this.notifySubscribers(safeEnvelope)
-    } else if (packet.type === 'SYNC_CHAT' && Array.isArray(packet.payload)) {
+      return true
+    }
+
+    if (packet.type === 'SYNC_CHAT' && Array.isArray(packet.payload)) {
       let addedAny = false
       for (const msg of packet.payload) {
-        if (msg && msg.id && !this.seenIds.has(msg.id)) {
-          const cleanText = sanitizeChatMessage(msg.text)
-          if (cleanText) {
-            this.addMessageToBuffer({ ...msg, text: cleanText })
-            addedAny = true
-          }
+        const safeEnvelope = this.acceptFromNetwork(msg)
+        if (safeEnvelope) {
+          this.addMessageToBuffer(safeEnvelope)
+          addedAny = true
         }
       }
       if (addedAny) {
         this.notifySubscribers(null)
       }
+      return addedAny
     }
+
+    return false
+  }
+
+  /**
+   * A network message as it should be stored, or null if it is a duplicate or
+   * has no text. Nothing that arrived over the wire is ever this device's own.
+   * @private
+   */
+  acceptFromNetwork(msg) {
+    if (!msg || typeof msg !== 'object' || !msg.id || this.seenIds.has(msg.id)) return null
+    const cleanText = sanitizeChatMessage(msg.text)
+    if (!cleanText) return null
+    return { ...msg, text: cleanText, isOwn: false }
   }
 
   /**

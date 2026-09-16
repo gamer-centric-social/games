@@ -35,8 +35,9 @@ export function useChat({
     const unsubscribe = chatService.subscribe((updatedMessages, newIncomingMsg) => {
       setMessages(updatedMessages)
 
-      // If a message was received from another player
-      if (newIncomingMsg && newIncomingMsg.senderId !== currentUserId) {
+      // newIncomingMsg is only ever set for a message that arrived over the
+      // network, and your own echo is dropped as a duplicate, so it is never yours.
+      if (newIncomingMsg) {
         if (!isChatOpenRef.current) {
           // Increment unread count
           setUnreadCount((count) => count + 1)
@@ -63,7 +64,7 @@ export function useChat({
       }
       unsubscribe()
     }
-  }, [chatService, currentUserId])
+  }, [chatService])
 
   // Open modal & clear unread / toast
   const openChat = useCallback(() => {

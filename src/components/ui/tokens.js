@@ -35,6 +35,8 @@ export const TONE_FILL = {
   imposter: 'bg-imposter text-table',
   uno: 'bg-uno text-table',
   tank: 'bg-tank text-table',
+  dice: 'bg-dice text-table',
+  bounce: 'bg-bounce text-table',
   ok: 'bg-ok text-table',
   danger: 'bg-danger text-table',
   turn: 'bg-turn text-table',
@@ -49,6 +51,8 @@ export const TONE_WASH = {
   imposter: 'bg-imposter/10 border-imposter/30 text-imposter',
   uno: 'bg-uno/10 border-uno/30 text-uno',
   tank: 'bg-tank/10 border-tank/30 text-tank',
+  dice: 'bg-dice/10 border-dice/30 text-dice',
+  bounce: 'bg-bounce/10 border-bounce/30 text-bounce',
   ok: 'bg-ok/10 border-ok/30 text-ok',
   danger: 'bg-danger/10 border-danger/30 text-danger',
   turn: 'bg-turn/10 border-turn/30 text-turn',
@@ -63,11 +67,23 @@ export const TONE_TEXT = {
   imposter: 'text-imposter',
   uno: 'text-uno',
   tank: 'text-tank',
+  dice: 'text-dice',
+  bounce: 'text-bounce',
   ok: 'text-ok',
   danger: 'text-danger',
   turn: 'text-turn',
   'team-blue': 'text-team-blue',
   'team-red': 'text-team-red',
+}
+
+/** An edge lit in the game's ink -- the selected avatar in a lobby. */
+export const TONE_BORDER = {
+  lamp: 'border-lamp',
+  imposter: 'border-imposter',
+  uno: 'border-uno',
+  tank: 'border-tank',
+  dice: 'border-dice',
+  bounce: 'border-bounce',
 }
 
 /** Focus ring, offset so it clears a lifted surface. */

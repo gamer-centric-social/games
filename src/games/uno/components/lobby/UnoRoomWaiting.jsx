@@ -9,6 +9,7 @@ import Button from '../../../../components/ui/Button'
 import Label from '../../../../components/ui/Label'
 import Pill from '../../../../components/ui/Pill'
 import PlayerRow, { Badge, Dot } from '../../../../components/ui/PlayerRow'
+import ChatUnreadBadge from '../../../../components/chat/ChatUnreadBadge'
 
 /** The waiting room, once you are connected and before the host deals. */
 export default function UnoRoomWaiting({
@@ -78,14 +79,10 @@ export default function UnoRoomWaiting({
           </Button>
 
           {onOpenChat && (
-            <Button variant="secondary" size="sm" onClick={onOpenChat} className="relative">
+            <Button variant="secondary" size="sm" onClick={onOpenChat}>
               <MessageSquare className="w-3.5 h-3.5" />
               Chat
-              {unreadChatCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.2 rounded-full bg-turn text-ink-bright text-nano font-mono font-bold">
-                  {unreadChatCount}
-                </span>
-              )}
+              <ChatUnreadBadge count={unreadChatCount} className="ml-1" />
             </Button>
           )}
         </div>

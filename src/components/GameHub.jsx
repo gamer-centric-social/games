@@ -31,6 +31,16 @@ const INK = {
     disc: 'ring-tank/40',
     hover: 'hover:border-tank/40',
   },
+  dice: {
+    badge: 'text-dice',
+    disc: 'ring-dice/40',
+    hover: 'hover:border-dice/40',
+  },
+  bounce: {
+    badge: 'text-bounce',
+    disc: 'ring-bounce/40',
+    hover: 'hover:border-bounce/40',
+  },
 }
 
 export default function GameHub({ onSelectGame, onOpenRulesForGame }) {
@@ -41,7 +51,7 @@ export default function GameHub({ onSelectGame, onOpenRulesForGame }) {
           What are we playing?
         </h1>
         <p className="text-sm text-ink-muted">
-          Three games. Everyone plays on their own phone.
+          Four games. Everyone plays on their own phone.
         </p>
       </header>
 

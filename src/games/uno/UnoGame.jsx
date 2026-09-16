@@ -17,6 +17,7 @@ import {
   resetToLobby,
   isMatchInProgress,
   sanitizePlayers,
+  publicRoster,
   handOf,
   playCard,
   drawCard,
@@ -46,6 +47,8 @@ import {
   playUnoCallSound,
 } from '../../utils/sound'
 import { ChatService } from '../../services/chat/ChatService'
+import { stampChatPacket, toWireMessage } from '../../services/chat/chatRelay'
+import { broadcastToSeats } from '../../services/room/roomChat'
 import { PeerJsChatTransport } from '../../services/chat/transports/PeerJsChatTransport'
 import { useChat } from '../../hooks/useChat'
 import ChatModal from '../../components/chat/ChatModal'
@@ -397,6 +400,17 @@ export default function UnoGame({
   }, [])
 
   // Broadcasts state to all connected clients & updates host UI
+  /**
+   * Host: everything the room says goes to seated, connected players only. The
+   * network's own broadcast reaches every open connection, including a peer that
+   * never sent JOIN or was turned away -- see broadcastToSeats.
+   */
+  const broadcastToRoom = useCallback((data) => {
+    const g = hostGameRef.current
+    const net = hostNetworkRef.current
+    if (g && net) broadcastToSeats(g.players, net.sendTo, data)
+  }, [])
+
   const hostBroadcastGameState = useCallback((customMessage = null) => {
     const g = hostGameRef.current
     if (!g) return
@@ -486,7 +500,7 @@ export default function UnoGame({
             break
 
           case 'BROADCAST':
-            hostNetworkRef.current?.broadcast(event.message)
+            broadcastToRoom(event.message)
             break
 
           case 'CELEBRATE':
@@ -538,7 +552,7 @@ export default function UnoGame({
         }
       }
     },
-    [playEngineSound]
+    [playEngineSound, broadcastToRoom]
   )
 
   /**
@@ -631,9 +645,9 @@ export default function UnoGame({
         hostNetworkRef.current.removeConnection(clientPeerId)
       }
 
-      const player = g.players.find(
-        (p) => p.peerId === clientPeerId || (explicitPlayerId !== null && p.id === explicitPlayerId)
-      )
+      // Only the connection's own seat. A playerId sent with ACTION_LEAVE used to be
+      // honoured too, which let any peer remove any player.
+      const player = g.players.find((p) => p.peerId === clientPeerId)
       if (!player || player.isHost) return
 
       const isGameActive = isMatchInProgress(g) && !g.winner
@@ -790,7 +804,7 @@ export default function UnoGame({
 
       lobbyDisconnectTimersRef.current.set(player.id, graceTimer)
     },
-    [hostBroadcastGameState]
+    [hostBroadcastGameState, broadcastToRoom]
   )
 
   // Connect client data ref to latest authoritative processors
@@ -800,9 +814,10 @@ export default function UnoGame({
       const g = hostGameRef.current
       if (!g) return
 
-      // Look up player directly by peer connection ID
+      // Who is acting is the seat this connection holds -- never a playerId in the
+      // packet. A peer that holds no seat (never joined, or was turned away) can do
+      // nothing: it used to fall back to data.playerId, or to whoever's turn it was.
       const player = g.players.find((p) => p.peerId === clientPeerId)
-      const playerId = player ? player.id : (data.playerId !== undefined ? data.playerId : g.currentPlayerIndex)
 
       if (data.type === 'CHAT_MESSAGE') {
         chatTransport.handleIncoming(data)
@@ -831,7 +846,8 @@ export default function UnoGame({
       }
     }
   }, [
-    chatTransport,
+    chatService,
+    broadcastToRoom,
     hostProcessPlayCard,
     hostProcessDrawCard,
     hostProcessPassTurn,
@@ -967,7 +983,7 @@ export default function UnoGame({
           type: 'WELCOME',
           playerId: result.player.id,
           roomCode: g.roomCode,
-          players: g.players,
+          players: publicRoster(g),
           maxPlayers: g.maxPlayers || 4,
           stackingEnabled: g.stackingEnabled !== false,
         }
@@ -982,7 +998,7 @@ export default function UnoGame({
           try {
             conn.send({
               type: 'SYNC_CHAT',
-              payload: recentChat,
+              payload: recentChat.map(toWireMessage),
             })
           } catch (e) {
             console.warn('[Host] Failed to send SYNC_CHAT:', e)
@@ -1007,10 +1023,10 @@ export default function UnoGame({
 
         // Lobby paths: everyone just needs the updated roster.
         setTimeout(() => {
-          hostNetworkRef.current?.broadcast({
+          broadcastToRoom({
             type: 'ROOM_UPDATE',
             roomCode: g.roomCode,
-            players: g.players,
+            players: publicRoster(g),
             maxPlayers: g.maxPlayers || 4,
             stackingEnabled: g.stackingEnabled !== false,
           })
@@ -1037,7 +1053,7 @@ export default function UnoGame({
     })
 
     hostNetworkRef.current = hostPeer
-    chatTransport.setSendFunction((data) => hostPeer.broadcast(data))
+    chatTransport.setSendFunction((data) => broadcastToRoom(data))
   }
 
   // Client joins room
@@ -1706,9 +1722,9 @@ export default function UnoGame({
     if (!g) return
     resetToLobby(g)
     if (hostNetworkRef.current) {
-      hostNetworkRef.current.broadcast({
+      broadcastToRoom({
         type: 'ROOM_RESET_TO_LOBBY',
-        players: g.players,
+        players: publicRoster(g),
       })
     }
     setMpConnectionStatus('connected')
@@ -1727,7 +1743,7 @@ export default function UnoGame({
     hasShownMyCelebrationRef.current = false
     setFinishedCelebration({ isOpen: false, rank: 1, playerName: 'You', activeRemaining: 2 })
     setMpActionMessage('Host returned all players to room lobby.')
-  }, [])
+  }, [broadcastToRoom])
 
   const handleClientReturnToLobby = useCallback(() => {
     clientStateVersionRef.current = 0
@@ -1789,6 +1805,7 @@ export default function UnoGame({
     clientStateVersionRef.current = 0
     hostStateVersionRef.current = 1
     chatService.clear()
+    chatTransport.setSendFunction(null)
     closeChat()
 
     clientLobbyReconnectAttemptsRef.current = 0
@@ -1856,7 +1873,7 @@ export default function UnoGame({
     hasShownMyCelebrationRef.current = false
     setFinishedCelebration({ isOpen: false, rank: 1, playerName: 'You', activeRemaining: 2 })
     setScreen('mp_lobby')
-  }, [closeChat, chatService])
+  }, [closeChat, chatService, chatTransport])
 
   // Handle color picker selection
   const handleColorSelected = (color) => {
@@ -2058,8 +2075,8 @@ export default function UnoGame({
             onClose={closeChat}
             messages={chatMessages}
             onSendMessage={handleSendChatMessage}
-            currentUserId={myPlayerId}
             roomCode={mpRoomState.roomCode}
+            tone="uno"
           />
           <ChatToastPreview
             toast={chatActiveToast}

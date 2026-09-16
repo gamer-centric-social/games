@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { ChatService } from './ChatService'
 import { PeerJsChatTransport } from './transports/PeerJsChatTransport'
 import { sanitizeChatMessage, createChatMessage, MAX_CHAT_MESSAGE_LENGTH } from './chatTypes'
+import { stampChatPacket } from './chatRelay'
 
 describe('chatTypes', () => {
   it('sanitizes text properly and truncates to max length', () => {
@@ -70,6 +71,45 @@ describe('ChatService', () => {
 
     expect(chatService.getHistory()).toHaveLength(1)
     expect(listener).toHaveBeenCalledWith(expect.any(Array), null)
+  })
+
+  it('marks a locally sent message as own, but never puts that flag on the wire', () => {
+    const mockSend = vi.fn()
+    const chatService = new ChatService({ transport: new PeerJsChatTransport({ send: mockSend }) })
+
+    chatService.sendMessage({ text: 'mine', senderId: 1, senderName: 'P1' })
+
+    expect(chatService.getHistory()[0].isOwn).toBe(true)
+    expect(mockSend.mock.calls[0][0].payload).not.toHaveProperty('isOwn')
+  })
+
+  it('never treats a network message as own, even if it claims to be', () => {
+    const chatService = new ChatService()
+    chatService.handleNetworkPacket({
+      type: 'CHAT_MESSAGE',
+      payload: { id: 'msg_claim', senderId: 1, senderName: 'P1', text: 'hi', isOwn: true },
+    })
+    chatService.handleNetworkPacket({
+      type: 'SYNC_CHAT',
+      payload: [{ id: 'msg_claim_2', senderId: 1, senderName: 'P1', text: 'hi', isOwn: true }],
+    })
+
+    expect(chatService.getHistory().map((m) => m.isOwn)).toEqual([false, false])
+  })
+
+  it('reports whether it accepted a network message', () => {
+    const chatService = new ChatService()
+    const packet = {
+      type: 'CHAT_MESSAGE',
+      payload: { id: 'msg_once', senderId: 1, senderName: 'P1', text: 'hi' },
+    }
+
+    expect(chatService.handleNetworkPacket(packet)).toBe(true)
+    expect(chatService.handleNetworkPacket(packet)).toBe(false)
+    expect(
+      chatService.handleNetworkPacket({ type: 'CHAT_MESSAGE', payload: { id: 'msg_blank', text: ' ' } })
+    ).toBe(false)
+    expect(chatService.handleNetworkPacket(null)).toBe(false)
   })
 
   it('receives incoming network packets, deduplicates, and notifies subscribers with newMsg', () => {
@@ -178,35 +218,58 @@ describe('ChatService', () => {
       client2Transport.handleIncoming(packet)
     })
 
-    // Wiring client1 sendAction to host onClientData (as in UnoGame.jsx line 710)
+    // The host's seat record for client 1 -- the only source of who sent it.
+    const client1Seat = { id: 1, name: 'Mobile User', avatar: '📱' }
+
+    // Wiring client1 sendAction to host onClientData (as in UnoGame.jsx)
     client1SendAction.mockImplementation((data) => {
-      // Host receives onClientData:
-      if (data.type === 'CHAT_MESSAGE') {
-        hostTransport.handleIncoming(data)
-        hostBroadcast(data)
+      const stamped = stampChatPacket(data, client1Seat)
+      if (stamped && hostChat.handleNetworkPacket(stamped)) {
+        hostBroadcast(stamped)
       }
     })
 
-    // Client 1 sends message
+    // Client 1 sends a message claiming to be the host
     client1Chat.sendMessage({
       text: 'Message from mobile!',
-      senderId: 1,
-      senderName: 'Mobile User',
-      avatar: '📱',
+      senderId: 0,
+      senderName: 'Host',
+      avatar: '👑',
     })
 
-    // Verify:
-    // Client 1 has 1 message
+    // Client 1 keeps its own copy, marked as its own; the echo is a duplicate.
     expect(client1Chat.getHistory()).toHaveLength(1)
-    expect(client1Chat.getHistory()[0].text).toBe('Message from mobile!')
+    expect(client1Chat.getHistory()[0]).toMatchObject({ text: 'Message from mobile!', isOwn: true })
 
-    // Host has 1 message
+    // Host and client 2 see the real sender, not the claimed one.
+    for (const chat of [hostChat, client2Chat]) {
+      expect(chat.getHistory()).toHaveLength(1)
+      expect(chat.getHistory()[0]).toMatchObject({
+        text: 'Message from mobile!',
+        senderId: 1,
+        senderName: 'Mobile User',
+        avatar: '📱',
+        isOwn: false,
+      })
+    }
+  })
+
+  it('host does not rebroadcast a message whose id it has already seen', () => {
+    const hostBroadcast = vi.fn()
+    const hostChat = new ChatService({ transport: new PeerJsChatTransport({ send: hostBroadcast }) })
+    const seat = { id: 1, name: 'P1' }
+    const relay = (data) => {
+      const stamped = stampChatPacket(data, seat)
+      if (stamped && hostChat.handleNetworkPacket(stamped)) hostBroadcast(stamped)
+    }
+
+    const packet = { type: 'CHAT_MESSAGE', payload: { id: 'msg_replay', text: 'once' } }
+    relay(packet)
+    relay({ ...packet, payload: { ...packet.payload, text: 'replayed with a stolen id' } })
+
+    expect(hostBroadcast).toHaveBeenCalledTimes(1)
     expect(hostChat.getHistory()).toHaveLength(1)
-    expect(hostChat.getHistory()[0].text).toBe('Message from mobile!')
-
-    // Client 2 has 1 message
-    expect(client2Chat.getHistory()).toHaveLength(1)
-    expect(client2Chat.getHistory()[0].text).toBe('Message from mobile!')
+    expect(hostChat.getHistory()[0].text).toBe('once')
   })
 
   it('supports attaching and detaching transports dynamically', () => {
